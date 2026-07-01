@@ -23,6 +23,7 @@ Required secrets/config:
 
 - `KAMIYA_GEMINI_API_KEY`: secret Gemini API key.
 - `KAMIYA_CERBANIMO_API_URL`: Cerbanimo API base URL.
+- `KAMIYA_CERBANIMO_BEARER_TOKEN`: scoped Cerbanimo service/bot token, or a short-lived backend-issued JWT until service tokens exist.
 - `KAMIYA_ALLOWED_ORIGIN`: Kamiya's public Render URL after first deploy.
 
 Render injects `PORT` automatically. Do not commit real `.env` files.

@@ -702,6 +702,34 @@ label span {
   font-weight: 680;
 }
 
+.settings-note {
+  display: grid;
+  grid-template-columns: auto 1fr;
+  gap: 10px;
+  align-items: start;
+  padding: 12px;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  color: var(--muted-strong);
+  background: rgba(255, 255, 255, 0.052);
+}
+
+.settings-note svg {
+  color: var(--cyan);
+  margin-top: 2px;
+}
+
+.settings-note p {
+  color: var(--muted-strong);
+  font-size: 13px;
+  line-height: 1.45;
+}
+
+.settings-note code {
+  color: var(--cyan);
+  font-size: 12px;
+}
+
 input {
   min-height: 42px;
   width: 100%;

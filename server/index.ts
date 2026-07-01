@@ -41,7 +41,8 @@ app.get("/api/health", (_req, res) => {
     ok: true,
     service: "kamiya-api",
     geminiModel: process.env.KAMIYA_GEMINI_MODEL ?? "gemini-3.1-flash-lite",
-    liveGemini: Boolean(process.env.KAMIYA_GEMINI_API_KEY)
+    liveGemini: Boolean(process.env.KAMIYA_GEMINI_API_KEY),
+    cerbanimoConfigured: Boolean(process.env.KAMIYA_CERBANIMO_API_URL && process.env.KAMIYA_CERBANIMO_BEARER_TOKEN)
   });
 });
 

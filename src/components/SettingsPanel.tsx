@@ -1,4 +1,4 @@
-import { KeyRound, Link2, UserRound, X } from "lucide-react";
+import { ServerCog, UserRound, X } from "lucide-react";
 import type { KamiyaAuthContext } from "../../shared/types";
 
 interface SettingsPanelProps {
@@ -23,28 +23,13 @@ export function SettingsPanel({ auth, open, onClose, onChange }: SettingsPanelPr
         </button>
       </div>
 
-      <label>
-        <span>
-          <Link2 size={16} /> Cerbanimo API URL
-        </span>
-        <input
-          value={auth.cerbanimoApiUrl ?? ""}
-          onChange={(event) => onChange({ ...auth, cerbanimoApiUrl: event.target.value })}
-          placeholder="http://localhost:4000"
-        />
-      </label>
-
-      <label>
-        <span>
-          <KeyRound size={16} /> Bearer token
-        </span>
-        <input
-          type="password"
-          value={auth.cerbanimoToken ?? ""}
-          onChange={(event) => onChange({ ...auth, cerbanimoToken: event.target.value, isLoggedIn: Boolean(event.target.value) })}
-          placeholder="Paste a local development JWT"
-        />
-      </label>
+      <div className="settings-note">
+        <ServerCog size={16} />
+        <p>
+          Cerbanimo API access is configured on the backend with <code>KAMIYA_CERBANIMO_API_URL</code> and{" "}
+          <code>KAMIYA_CERBANIMO_BEARER_TOKEN</code>. Secrets are never entered in the browser.
+        </p>
+      </div>
 
       <label>
         <span>

@@ -13,24 +13,37 @@ const requiredFields: Array<keyof PlanningDraft> = [
 ];
 
 export async function analyzePlanning(message: string, currentDraft?: PlanningDraft): Promise<PlanningAnalysis> {
+  const localAnalysis = analyzePlanningLocally(message, currentDraft);
   const aiAnalysis = await generateGeminiJson<PlanningAnalysis>({
     prompt: buildPlanningPrompt(message, currentDraft),
     responseSchema: planningResponseSchema
-  });
+  }).catch(() => null);
 
-  return normalizePlanning(aiAnalysis ?? analyzePlanningLocally(message, currentDraft));
+  if (!aiAnalysis) return normalizePlanning(localAnalysis);
+
+  return normalizePlanning({
+    ...aiAnalysis,
+    draft: {
+      ...(aiAnalysis.draft ?? {}),
+      ...compactDraft(localAnalysis.draft)
+    },
+    fulfilled_fields: [...(aiAnalysis.fulfilled_fields ?? []), ...localAnalysis.fulfilled_fields]
+  });
 }
 
 function analyzePlanningLocally(message: string, currentDraft?: PlanningDraft): PlanningAnalysis {
   const draft: PlanningDraft = { ...(currentDraft ?? {}) };
-  const clean = message.replace(/^\/plan\s*/i, "").trim();
+  const clean = message.replace(/^\/(plan|create)\s*/i, "").trim();
+  const explicitMission = extractMission(clean);
 
   if (!draft.title && clean) draft.title = titleFromMessage(clean);
+  if (explicitMission) draft.mission = explicitMission;
   if (!draft.mission && clean) draft.mission = clean;
   if (!draft.desiredOutcome) draft.desiredOutcome = extractOutcome(clean);
   if (!draft.timeline) draft.timeline = extractTimeline(clean);
   if (!draft.audience) draft.audience = extractAudience(clean);
   if (!draft.successCriteria) draft.successCriteria = extractSuccessCriteria(clean, draft.desiredOutcome);
+  if (!draft.desiredOutcome && draft.successCriteria) draft.desiredOutcome = draft.successCriteria;
 
   const missing = requiredFields
     .filter((field) => !draft[field])
@@ -72,7 +85,14 @@ function normalizePlanning(analysis: PlanningAnalysis): PlanningAnalysis {
   };
 }
 
+function compactDraft(draft: PlanningDraft): PlanningDraft {
+  return Object.fromEntries(Object.entries(draft).filter(([, value]) => Boolean(value))) as PlanningDraft;
+}
+
 function titleFromMessage(message: string): string {
+  const projectForMatch = message.match(/^project\s+for\s+(?:a\s+|an\s+|the\s+)?(.+?)(?:\s+(?:today|tomorrow|this week|next week|this month|next month|this quarter|next quarter|this year|next year|by\b|so\b)|$)/i);
+  if (projectForMatch?.[1]) return toTitle(projectForMatch[1]);
+
   const normalized = message
     .replace(/\bfor\b.+$/i, "")
     .replace(/\bso\b.+$/i, "")
@@ -82,11 +102,25 @@ function titleFromMessage(message: string): string {
   return normalized.length > 54 ? `${normalized.slice(0, 51)}...` : normalized;
 }
 
+function toTitle(value: string): string {
+  return value
+    .replace(/[.?!]+$/, "")
+    .trim()
+    .split(/\s+/)
+    .map((word) => (word.length <= 3 ? word.toLowerCase() : `${word[0]?.toUpperCase() ?? ""}${word.slice(1)}`))
+    .join(" ");
+}
+
+function extractMission(message: string): string | undefined {
+  const missionMatch = message.match(/\bmission\s+(?:is|to|should)\s+(.+?)(?:,\s*(?:the\s+)?(?:audience|timeline|success|outcome)\b|$)/i);
+  return missionMatch?.[1]?.trim();
+}
+
 function extractOutcome(message: string): string | undefined {
   const soMatch = message.match(/\bso(?: that)?\s+(.+)$/i);
   if (soMatch?.[1]) return soMatch[1].trim();
 
-  const outcomeMatch = message.match(/\b(?:outcome|goal is|in order to)\s+(.+)$/i);
+  const outcomeMatch = message.match(/\b(?:outcome|goal is|goal|in order to)\s+(?:is\s+)?(.+?)(?:,\s*(?:the\s+)?(?:audience|timeline|success|mission)\b|$)/i);
   return outcomeMatch?.[1]?.trim();
 }
 
@@ -96,6 +130,9 @@ function extractTimeline(message: string): string | undefined {
 }
 
 function extractAudience(message: string): string | undefined {
+  const explicitAudience = message.match(/\baudience\s+(?:is|includes|should be)\s+(.+?)(?:,\s*(?:the\s+)?(?:mission|timeline|success|outcome)\b|$)/i);
+  if (explicitAudience?.[1]) return explicitAudience[1].trim();
+
   const audienceMatch = message.match(/\bfor\s+(.+?)(?:\s+(?:today|tomorrow|this week|next week|this month|next month|this quarter|next quarter|this year|next year|by\b|so\b)|$)/i);
   return audienceMatch?.[1]?.trim();
 }

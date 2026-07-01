@@ -23,6 +23,13 @@ describe("routeIntentLocally", () => {
     expect(intent.next_action).toBe("ask_missing_inputs");
   });
 
+  it("detects natural create project requests as planning", () => {
+    const intent = routeIntentLocally("Create a project for a youth coding club");
+
+    expect(intent.intent).toBe("planning");
+    expect(intent.next_action).toBe("ask_missing_inputs");
+  });
+
   it("routes task and profile commands into phase 2 actions", () => {
     expect(routeIntentLocally("/task").next_action).toBe("show_tasks");
     expect(routeIntentLocally("/profile").next_action).toBe("show_profile");

@@ -1,33 +1,19 @@
-import type { ActionExecutionRecord, ActionPreview, CerbanimoResult, KamiyaAuthContext } from "../../shared/types";
+import type { ActionPreview, CerbanimoResult, KamiyaAuthContext } from "../../shared/types";
 
 export class CerbanimoClient {
   private readonly apiUrl: string;
   private readonly token?: string;
 
   constructor(auth: KamiyaAuthContext) {
-    this.apiUrl = auth.cerbanimoApiUrl || process.env.KAMIYA_CERBANIMO_API_URL || "";
-    this.token = auth.cerbanimoToken;
+    this.apiUrl = process.env.KAMIYA_CERBANIMO_API_URL || auth.cerbanimoApiUrl || "";
+    this.token = process.env.KAMIYA_CERBANIMO_BEARER_TOKEN || auth.cerbanimoToken;
   }
 
   async executeAction(action: ActionPreview): Promise<CerbanimoResult> {
     if (!this.apiUrl || !this.token) {
-      const record: ActionExecutionRecord = {
-        id: crypto.randomUUID(),
-        previewId: action.id,
-        kind: action.kind,
-        status: action.kind === "run_automation" ? "queued" : "completed",
-        title: action.title,
-        summary: action.summary,
-        createdAt: new Date().toISOString(),
-        updatedAt: new Date().toISOString(),
-        mocked: true,
-        cerbanimoActionId: `mock-${action.id}`
-      };
-
       return {
-        ok: true,
-        mocked: true,
-        data: record
+        ok: false,
+        error: `Kamiya cannot execute "${action.title}" yet because Cerbanimo API credentials are not configured on the backend. Set ${this.apiUrl ? "" : "KAMIYA_CERBANIMO_API_URL"}${!this.apiUrl && !this.token ? " and " : ""}${this.token ? "" : "KAMIYA_CERBANIMO_BEARER_TOKEN"} in the server environment, then restart Kamiya. The action preview is still safe and no Cerbanimo data was modified.`
       };
     }
 

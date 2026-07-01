@@ -32,6 +32,7 @@ Copy `.env.example` to `.env` and configure:
 - `KAMIYA_GEMINI_API_KEY`: server-side Gemini API key.
 - `KAMIYA_GEMINI_MODEL`: defaults to `gemini-3.1-flash-lite`.
 - `KAMIYA_CERBANIMO_API_URL`: default Cerbanimo API base URL.
+- `KAMIYA_CERBANIMO_BEARER_TOKEN`: server-side Cerbanimo bearer token. This is never entered in the browser.
 - `KAMIYA_ALLOWED_ORIGIN`: web client origin for CORS.
 
 ## Architecture

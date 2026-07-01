@@ -8,19 +8,18 @@ export function loadAuth(): KamiyaAuthContext {
   if (!raw) {
     return {
       isLoggedIn: false,
-      cerbanimoApiUrl: "http://localhost:4000",
       permissions: ["projects:create", "tasks:submit", "automation:create"]
     };
   }
 
   return {
     permissions: ["projects:create", "tasks:submit", "automation:create"],
-    ...JSON.parse(raw)
+    ...sanitizeAuth(JSON.parse(raw) as KamiyaAuthContext)
   };
 }
 
 export function saveAuth(auth: KamiyaAuthContext): void {
-  localStorage.setItem(authKey, JSON.stringify(auth));
+  localStorage.setItem(authKey, JSON.stringify(sanitizeAuth(auth)));
 }
 
 export function loadSession(): KamiyaSessionState {
@@ -30,4 +29,11 @@ export function loadSession(): KamiyaSessionState {
 
 export function saveSession(session: KamiyaSessionState): void {
   localStorage.setItem(sessionKey, JSON.stringify(session));
+}
+
+function sanitizeAuth(auth: KamiyaAuthContext): KamiyaAuthContext {
+  const safeAuth = { ...auth };
+  delete safeAuth.cerbanimoToken;
+  delete safeAuth.cerbanimoApiUrl;
+  return safeAuth;
 }

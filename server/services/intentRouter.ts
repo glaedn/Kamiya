@@ -9,7 +9,7 @@ export async function routeIntent(request: ChatTurnRequest): Promise<RoutedInten
   const routed = await generateGeminiJson<RoutedIntent>({
     prompt,
     responseSchema: intentResponseSchema
-  });
+  }).catch(() => null);
 
   return normalizeIntent(routed ?? routeIntentLocally(request.message));
 }

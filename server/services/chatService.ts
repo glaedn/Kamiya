@@ -57,11 +57,16 @@ export async function handleChatTurn(request: ChatTurnRequest): Promise<ChatTurn
     return respond("Here are the paths I can take with you.", request.session, intent, [helpCard(), modeCard(activeMode), integrationCard()]);
   }
 
-  if (intent.intent === "planning") {
+  if (isProjectPlanningTurn(message, intent, request.session.planningDraft)) {
     const analysis = await analyzePlanning(message, request.session.planningDraft);
     if (!analysis.ready_to_create) {
       const question = analysis.recommended_next_questions[0] ?? "What detail should I add next?";
-      return respond(question, { ...request.session, planningDraft: analysis.draft }, intent, [questSummaryCard(analysis.draft)]);
+      return respond(
+        `I can help create that project, but I need one more concrete detail before I can prepare the Cerbanimo action preview. ${question}`,
+        { ...request.session, planningDraft: analysis.draft },
+        intent,
+        [questSummaryCard(analysis.draft)]
+      );
     }
 
     const action = previewProjectCreation(analysis.draft);
@@ -168,7 +173,11 @@ export async function handleChatTurn(request: ChatTurnRequest): Promise<ChatTurn
     );
   }
 
-  return respond("What is your quest?", request.session, intent);
+  return respond(
+    `I heard you, but I could not map that into an executable Kamiya workflow yet. Routed intent: ${intent.intent}; next action: ${intent.next_action}. Try /plan for project creation, /task for task management, /automation for workflows, or /help to see supported paths.`,
+    request.session,
+    intent
+  );
 }
 
 export async function handleChannelTurn(channelRequest: {
@@ -272,4 +281,13 @@ function isActionQueueRequest(message: string): boolean {
 
 function isValidationReportRequest(message: string): boolean {
   return /\b(validation report|report|validate preview)\b/i.test(message);
+}
+
+function isProjectPlanningTurn(message: string, intent: ChatMessage["intent"], planningDraft?: ChatTurnRequest["session"]["planningDraft"]): boolean {
+  if (planningDraft && Object.keys(planningDraft).length > 0) return true;
+  if (!intent) return false;
+  if (intent.intent === "planning") return true;
+  if (intent.next_action !== "ask_missing_inputs") return false;
+  if (message.trim().toLowerCase().startsWith("/create")) return true;
+  return intent.intent === "administration" && /\b(project|quest|plan|create|start)\b/i.test(message);
 }
