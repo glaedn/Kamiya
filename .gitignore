@@ -1,0 +1,22 @@
+node_modules/
+dist/
+coverage/
+.vite/
+
+# Local environment and secrets. Commit only documented examples.
+.env
+.env.*
+!.env.example
+!.env.render.example
+
+# Runtime and local QA artifacts.
+*.log
+qa-*.png
+playwright-report/
+test-results/
+
+# OS/editor noise.
+.DS_Store
+Thumbs.db
+.idea/
+.vscode/

@@ -1,0 +1,25 @@
+services:
+  - type: web
+    name: kamiya
+    runtime: node
+    plan: free
+    region: oregon
+    buildCommand: npm ci && npm run build
+    startCommand: npm start
+    healthCheckPath: /api/health
+    autoDeployTrigger: commit
+    envVars:
+      - key: NODE_ENV
+        value: production
+      - key: NODE_VERSION
+        value: 22.16.0
+      - key: KAMIYA_GEMINI_MODEL
+        value: gemini-3.1-flash-lite
+      - key: KAMIYA_REQUIRE_CHANNEL_SIGNATURES
+        value: "false"
+      - key: KAMIYA_GEMINI_API_KEY
+        sync: false
+      - key: KAMIYA_CERBANIMO_API_URL
+        sync: false
+      - key: KAMIYA_ALLOWED_ORIGIN
+        sync: false
