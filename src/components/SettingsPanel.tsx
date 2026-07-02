@@ -1,14 +1,18 @@
-import { ServerCog, UserRound, X } from "lucide-react";
+import { LogIn, LogOut, ServerCog, UserRound, X } from "lucide-react";
 import type { KamiyaAuthContext } from "../../shared/types";
 
 interface SettingsPanelProps {
   auth: KamiyaAuthContext;
   open: boolean;
+  isLoggingIn: boolean;
+  loginError?: string;
   onClose: () => void;
   onChange: (auth: KamiyaAuthContext) => void;
+  onLogin: () => void;
+  onLogout: () => void;
 }
 
-export function SettingsPanel({ auth, open, onClose, onChange }: SettingsPanelProps) {
+export function SettingsPanel({ auth, open, isLoggingIn, loginError, onClose, onChange, onLogin, onLogout }: SettingsPanelProps) {
   if (!open) return null;
 
   return (
@@ -26,8 +30,8 @@ export function SettingsPanel({ auth, open, onClose, onChange }: SettingsPanelPr
       <div className="settings-note">
         <ServerCog size={16} />
         <p>
-          Cerbanimo API access is configured on the backend with <code>KAMIYA_CERBANIMO_API_URL</code> and{" "}
-          <code>KAMIYA_CERBANIMO_BEARER_TOKEN</code>. Secrets are never entered in the browser.
+          Log in through Cerbanimo Auth0. Kamiya opens Cerbanimo's auth bridge in a popup, receives the access token, and keeps it in
+          browser session storage only.
         </p>
       </div>
 
@@ -45,10 +49,14 @@ export function SettingsPanel({ auth, open, onClose, onChange }: SettingsPanelPr
       <button
         className="primary wide"
         type="button"
-        onClick={() => onChange({ ...auth, isLoggedIn: !auth.isLoggedIn })}
+        onClick={auth.isLoggedIn ? onLogout : onLogin}
+        disabled={isLoggingIn}
       >
-        {auth.isLoggedIn ? "Use logged-out mode" : "Use logged-in mode"}
+        {auth.isLoggedIn ? <LogOut size={16} /> : <LogIn size={16} />}
+        {isLoggingIn ? "Opening Cerbanimo..." : auth.isLoggedIn ? "Log out" : "Log in with Cerbanimo"}
       </button>
+
+      {loginError ? <p className="settings-error">{loginError}</p> : null}
     </aside>
   );
 }

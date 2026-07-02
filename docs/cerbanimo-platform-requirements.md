@@ -87,6 +87,74 @@ Returns renderable page descriptors/cards for profile, project, task, dashboard,
 - Bot identity mapping for Discord, Slack, and Google Chat users.
 - Permission introspection endpoint.
 
+## Auth0 Bridge For Kamiya Web Login
+
+Kamiya now expects Cerbanimo to provide a popup auth bridge so the user can log in through Cerbanimo/Auth0 without manually pasting tokens into Kamiya.
+
+### Cerbanimo Routes
+
+#### `GET /auth/bridge/start`
+
+Accepts:
+
+- `return_origin`: the Kamiya browser origin that should receive the login result.
+- `nonce`: a Kamiya-generated opaque value that must be echoed back after login.
+
+Behavior:
+
+- Validate `return_origin` against `VITE_AUTH_BRIDGE_ALLOWED_ORIGINS`.
+- Store `return_origin` and `nonce` in short-lived Auth0 transaction state.
+- Redirect the popup to the existing Cerbanimo Auth0 login flow.
+
+#### `GET /auth/bridge/callback`
+
+Behavior:
+
+- Complete the Auth0 callback.
+- Mint or retrieve the Cerbanimo Auth0 API access token for the logged-in user.
+- Render a minimal bridge page that calls `window.opener.postMessage(message, return_origin)`.
+- Close the popup after posting the message.
+
+Success message contract:
+
+```ts
+{
+  type: "CERBANIMO_AUTH_BRIDGE_SUCCESS";
+  tokenType: "Bearer";
+  accessToken: string;
+  expiresAt?: string | number;
+  audience?: string;
+  user?: {
+    sub?: string;
+    name?: string;
+    nickname?: string;
+    email?: string;
+    picture?: string;
+  };
+  nonce: string;
+}
+```
+
+Error message contract:
+
+```ts
+{
+  type: "CERBANIMO_AUTH_BRIDGE_ERROR";
+  error?: string;
+  errorDescription?: string;
+  message?: string;
+  nonce: string;
+}
+```
+
+### Cerbanimo/Auth0 Configuration
+
+- Add Auth0 Allowed Callback URL: `http://localhost:3000/auth/bridge/callback`
+- Add the production equivalent callback URL.
+- Set Cerbanimo frontend env: `VITE_AUTH_BRIDGE_ALLOWED_ORIGINS=http://localhost:5173,<production-kamiya-origin>`
+- Set Cerbanimo backend env: `KAMIYA_ALLOWED_ORIGINS=http://localhost:5173,<production-kamiya-origin>`
+- Ensure the returned `accessToken` is accepted by Cerbanimo API endpoints through `Authorization: Bearer <token>`.
+
 ## Notification Needs
 
 - User notification preferences.

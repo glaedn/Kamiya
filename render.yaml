@@ -25,5 +25,9 @@ services:
         sync: false
       - key: KAMIYA_CERBANIMO_BEARER_TOKEN
         sync: false
+      - key: VITE_CERBANIMO_ORIGIN
+        sync: false
+      - key: VITE_CERBANIMO_API_BASE
+        sync: false
       - key: KAMIYA_ALLOWED_ORIGIN
         sync: false

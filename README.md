@@ -33,7 +33,11 @@ Copy `.env.example` to `.env` and configure:
 - `KAMIYA_GEMINI_MODEL`: defaults to `gemini-3.1-flash-lite`.
 - `KAMIYA_CERBANIMO_API_URL`: default Cerbanimo API base URL.
 - `KAMIYA_CERBANIMO_BEARER_TOKEN`: server-side Cerbanimo bearer token. This is never entered in the browser.
+- `VITE_CERBANIMO_ORIGIN`: Cerbanimo frontend origin that hosts `/auth/bridge/start`.
+- `VITE_CERBANIMO_API_BASE`: Cerbanimo API base used for user-scoped Auth0 token calls.
 - `KAMIYA_ALLOWED_ORIGIN`: web client origin for CORS.
+
+For popup login, Cerbanimo must allow Kamiya's browser origin in its auth bridge settings and Auth0 callback settings. See `docs/cerbanimo-platform-requirements.md` for the platform-side work.
 
 ## Architecture
 

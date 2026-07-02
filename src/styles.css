@@ -173,6 +173,8 @@ h1 {
 
 .topbar-actions {
   gap: 10px;
+  flex-wrap: wrap;
+  justify-content: flex-end;
 }
 
 .status {
@@ -464,6 +466,16 @@ dd {
   box-shadow: var(--glow-magenta);
 }
 
+.auth-button {
+  min-width: 92px;
+}
+
+.primary:disabled,
+.secondary:disabled {
+  cursor: wait;
+  opacity: 0.68;
+}
+
 .danger {
   color: #ffffff;
   background: linear-gradient(135deg, var(--danger), var(--magenta-strong));
@@ -728,6 +740,16 @@ label span {
 .settings-note code {
   color: var(--cyan);
   font-size: 12px;
+}
+
+.settings-error {
+  padding: 10px 12px;
+  border: 1px solid rgba(255, 91, 122, 0.5);
+  border-radius: 8px;
+  color: #ffd6df;
+  background: rgba(255, 91, 122, 0.12);
+  font-size: 13px;
+  line-height: 1.45;
 }
 
 input {

@@ -1,5 +1,5 @@
 import { FormEvent, useEffect, useMemo, useRef, useState } from "react";
-import { Bot, Send, Settings, Slash, Sparkles } from "lucide-react";
+import { Bot, LogIn, LogOut, Send, Settings, Slash, Sparkles } from "lucide-react";
 import type { CardAction, ChatMessage, KamiyaAuthContext, KamiyaSessionState } from "../shared/types";
 import { slashCommands } from "../shared/commands";
 import { CommandMenu } from "./components/CommandMenu";
@@ -7,13 +7,16 @@ import { MessageBubble } from "./components/MessageBubble";
 import { SettingsPanel } from "./components/SettingsPanel";
 import { makeUserMessage, sendChatTurn } from "./lib/kamiyaApi";
 import { loadAuth, loadSession, saveAuth, saveSession } from "./lib/storage";
+import { attachCerbanimoAuth, clearCerbanimoSession, hydrateAuthFromCerbanimoSession, startCerbanimoLogin } from "./lib/authBridge";
 
 export default function App() {
-  const [auth, setAuth] = useState<KamiyaAuthContext>(() => loadAuth());
+  const [auth, setAuth] = useState<KamiyaAuthContext>(() => hydrateAuthFromCerbanimoSession(loadAuth()));
   const [session, setSession] = useState<KamiyaSessionState>(() => loadSession());
-  const [messages, setMessages] = useState<ChatMessage[]>(() => [introMessage(loadAuth().isLoggedIn)]);
+  const [messages, setMessages] = useState<ChatMessage[]>(() => [introMessage(hydrateAuthFromCerbanimoSession(loadAuth()).isLoggedIn)]);
   const [input, setInput] = useState("");
   const [isSending, setIsSending] = useState(false);
+  const [isLoggingIn, setIsLoggingIn] = useState(false);
+  const [loginError, setLoginError] = useState<string | undefined>();
   const [settingsOpen, setSettingsOpen] = useState(false);
   const endRef = useRef<HTMLDivElement | null>(null);
 
@@ -54,7 +57,7 @@ export default function App() {
         message: trimmed,
         history: nextHistory,
         session,
-        auth
+        auth: attachCerbanimoAuth(auth)
       });
       setSession(response.session);
       setMessages((current) => [...current, response.message]);
@@ -89,6 +92,31 @@ export default function App() {
     }
   }
 
+  async function handleLogin() {
+    if (isLoggingIn) return;
+    setIsLoggingIn(true);
+    setLoginError(undefined);
+
+    try {
+      const result = await startCerbanimoLogin();
+      setAuth((current) => ({ ...current, ...result.auth, isLoggedIn: true }));
+      setSettingsOpen(false);
+    } catch (error) {
+      setLoginError(error instanceof Error ? error.message : "Cerbanimo login failed.");
+    } finally {
+      setIsLoggingIn(false);
+    }
+  }
+
+  function handleLogout() {
+    clearCerbanimoSession();
+    setAuth((current) => ({
+      isLoggedIn: false,
+      displayName: current.displayName,
+      permissions: current.permissions ?? ["projects:create", "tasks:submit", "automation:create"]
+    }));
+  }
+
   return (
     <main className="app-shell">
       <section className="chat-panel" aria-label="Kamiya chat">
@@ -105,6 +133,10 @@ export default function App() {
 
           <div className="topbar-actions">
             <span className={auth.isLoggedIn ? "status connected" : "status"}>{statusLabel}</span>
+            <button className="secondary auth-button" type="button" onClick={auth.isLoggedIn ? handleLogout : handleLogin} disabled={isLoggingIn}>
+              {auth.isLoggedIn ? <LogOut size={16} /> : <LogIn size={16} />}
+              {isLoggingIn ? "Opening..." : auth.isLoggedIn ? "Log out" : "Log in"}
+            </button>
             <button className="icon-button" type="button" onClick={() => setSettingsOpen(true)} aria-label="Open settings">
               <Settings size={18} />
             </button>
@@ -222,7 +254,16 @@ export default function App() {
         </div>
       </aside>
 
-      <SettingsPanel auth={auth} open={settingsOpen} onClose={() => setSettingsOpen(false)} onChange={setAuth} />
+      <SettingsPanel
+        auth={auth}
+        open={settingsOpen}
+        isLoggingIn={isLoggingIn}
+        loginError={loginError}
+        onClose={() => setSettingsOpen(false)}
+        onChange={setAuth}
+        onLogin={() => void handleLogin()}
+        onLogout={handleLogout}
+      />
     </main>
   );
 }

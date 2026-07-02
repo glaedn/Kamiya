@@ -24,9 +24,17 @@ Required secrets/config:
 - `KAMIYA_GEMINI_API_KEY`: secret Gemini API key.
 - `KAMIYA_CERBANIMO_API_URL`: Cerbanimo API base URL.
 - `KAMIYA_CERBANIMO_BEARER_TOKEN`: scoped Cerbanimo service/bot token, or a short-lived backend-issued JWT until service tokens exist.
+- `VITE_CERBANIMO_ORIGIN`: Cerbanimo frontend origin for `/auth/bridge/start`.
+- `VITE_CERBANIMO_API_BASE`: Cerbanimo API base for user-scoped token calls.
 - `KAMIYA_ALLOWED_ORIGIN`: Kamiya's public Render URL after first deploy.
 
 Render injects `PORT` automatically. Do not commit real `.env` files.
+
+Cerbanimo/Auth0 must also allow Kamiya's deployed origin:
+
+- Auth0 Allowed Callback URL: `https://<cerbanimo-origin>/auth/bridge/callback`
+- Cerbanimo frontend env: `VITE_AUTH_BRIDGE_ALLOWED_ORIGINS=https://<kamiya-origin>`
+- Cerbanimo backend env: `KAMIYA_ALLOWED_ORIGINS=https://<kamiya-origin>`
 
 ## Deploy Steps
 
