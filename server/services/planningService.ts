@@ -3,14 +3,7 @@ import { planningResponseSchema } from "../ai/jsonSchemas";
 import { generateGeminiJson } from "../ai/geminiClient";
 import { buildPlanningPrompt } from "../ai/prompts";
 
-const requiredFields: Array<keyof PlanningDraft> = [
-  "title",
-  "mission",
-  "desiredOutcome",
-  "audience",
-  "timeline",
-  "successCriteria"
-];
+const requiredFields: Array<keyof PlanningDraft> = ["title", "mission", "desiredOutcome"];
 
 export async function analyzePlanning(message: string, currentDraft?: PlanningDraft): Promise<PlanningAnalysis> {
   const localAnalysis = analyzePlanningLocally(message, currentDraft);
@@ -34,10 +27,14 @@ export async function analyzePlanning(message: string, currentDraft?: PlanningDr
 function analyzePlanningLocally(message: string, currentDraft?: PlanningDraft): PlanningAnalysis {
   const draft: PlanningDraft = { ...(currentDraft ?? {}) };
   const clean = message.replace(/^\/(plan|create)\s*/i, "").trim();
+  const explicitTitle = extractTitle(clean);
   const explicitMission = extractMission(clean);
+  const explicitDescription = extractDescription(clean);
 
+  if (explicitTitle) draft.title = explicitTitle;
   if (!draft.title && clean) draft.title = titleFromMessage(clean);
-  if (explicitMission) draft.mission = explicitMission;
+  if (explicitDescription) draft.mission = explicitDescription;
+  if (!explicitDescription && explicitMission) draft.mission = explicitMission;
   if (!draft.mission && clean) draft.mission = clean;
   if (!draft.desiredOutcome) draft.desiredOutcome = extractOutcome(clean);
   if (!draft.timeline) draft.timeline = extractTimeline(clean);
@@ -102,6 +99,11 @@ function titleFromMessage(message: string): string {
   return normalized.length > 54 ? `${normalized.slice(0, 51)}...` : normalized;
 }
 
+function extractTitle(message: string): string | undefined {
+  const titleMatch = message.match(/\b(?:project|quest)\s+(?:named|called)\s+(.+?)(?:[,.]|\s+(?:description|outcome|goal|mission)\b|$)/i);
+  return titleMatch?.[1] ? toTitle(titleMatch[1]) : undefined;
+}
+
 function toTitle(value: string): string {
   return value
     .replace(/[.?!]+$/, "")
@@ -114,6 +116,11 @@ function toTitle(value: string): string {
 function extractMission(message: string): string | undefined {
   const missionMatch = message.match(/\bmission\s+(?:is|to|should)\s+(.+?)(?:,\s*(?:the\s+)?(?:audience|timeline|success|outcome)\b|$)/i);
   return missionMatch?.[1]?.trim();
+}
+
+function extractDescription(message: string): string | undefined {
+  const descriptionMatch = message.match(/\b(?:description|project description)\s+(?:is|should be|:)\s+(.+?)(?:,\s*(?:the\s+)?(?:audience|timeline|success|outcome|goal|mission)\b|$)/i);
+  return descriptionMatch?.[1]?.trim();
 }
 
 function extractOutcome(message: string): string | undefined {
@@ -147,8 +154,8 @@ function extractSuccessCriteria(message: string, outcome?: string): string | und
 function questionForField(field: keyof PlanningDraft): string {
   const questions: Record<keyof PlanningDraft, string> = {
     title: "What should we call this quest?",
-    mission: "What mission should this project serve?",
-    desiredOutcome: "What outcome would make this feel complete?",
+    mission: "What should the Cerbanimo project description say?",
+    desiredOutcome: "What real-world outcome should Cerbanimo attach to this project?",
     audience: "Who is this for or who should be involved?",
     timeline: "What timeline or deadline should I plan around?",
     constraints: "Are there any constraints I should respect?",

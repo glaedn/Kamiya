@@ -1,25 +1,48 @@
 import type { ActionPreview, AutomationWorkflowKind, PlanningDraft, RoutedIntent } from "../../shared/types";
 
 export function previewProjectCreation(draft: PlanningDraft): ActionPreview {
+  const tags = normalizeTags(draft);
+
   return {
     id: crypto.randomUUID(),
     kind: "create_project",
     title: `Create project: ${draft.title ?? "Untitled quest"}`,
-    summary: `Kamiya will create a Cerbanimo project with mission "${draft.mission ?? "TBD"}" and outcome "${draft.desiredOutcome ?? "TBD"}".`,
+    summary: `Kamiya will create a Cerbanimo project named "${draft.title ?? "Untitled quest"}" with outcome "${draft.desiredOutcome ?? "TBD"}".`,
     risk: "low",
     destructive: false,
     payload: {
-      title: draft.title,
-      mission: draft.mission,
-      description: draft.desiredOutcome,
+      name: draft.title,
+      description: draft.mission,
+      outcomeStatement: draft.desiredOutcome,
+      tags: tags.map((name) => ({ name })),
+      due_date: normalizeDueDate(draft.timeline),
+      auto_assign: false,
+      autoGeneratePlan: true,
+      is_service: false,
+      service_visibility: ["private"],
+      service_price: 0,
       audience: draft.audience,
-      timeline: draft.timeline,
       constraints: draft.constraints,
       successCriteria: draft.successCriteria
     },
     requiredPermissions: ["projects:create"],
     createdAt: new Date().toISOString()
   };
+}
+
+function normalizeTags(draft: PlanningDraft): string[] {
+  const values = [draft.audience, draft.successCriteria]
+    .filter(Boolean)
+    .flatMap((value) => String(value).split(/[,;]/g))
+    .map((value) => value.trim())
+    .filter((value) => value.length > 0 && value.length <= 48);
+
+  return [...new Set(values)].slice(0, 8);
+}
+
+function normalizeDueDate(value: string | undefined): string | null {
+  if (!value) return null;
+  return /^\d{4}-\d{2}-\d{2}/.test(value) ? value : null;
 }
 
 export function previewAutomation(intent: RoutedIntent, message: string): ActionPreview {

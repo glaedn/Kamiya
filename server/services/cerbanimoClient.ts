@@ -3,8 +3,10 @@ import type { ActionPreview, CerbanimoResult, KamiyaAuthContext } from "../../sh
 export class CerbanimoClient {
   private readonly apiUrl: string;
   private readonly token?: string;
+  private readonly auth: KamiyaAuthContext;
 
   constructor(auth: KamiyaAuthContext) {
+    this.auth = auth;
     this.apiUrl = process.env.KAMIYA_CERBANIMO_API_URL || auth.cerbanimoApiUrl || "";
     this.token = process.env.KAMIYA_CERBANIMO_BEARER_TOKEN || auth.cerbanimoToken;
   }
@@ -18,7 +20,7 @@ export class CerbanimoClient {
     }
 
     if (action.kind === "create_project") {
-      return this.request("/projects", "POST", action.payload);
+      return this.createProject(action);
     }
 
     if (action.kind === "submit_task") {
@@ -33,6 +35,48 @@ export class CerbanimoClient {
     return {
       ok: false,
       error: `No Cerbanimo execution mapping exists for ${action.kind}`
+    };
+  }
+
+  private async createProject(action: ActionPreview): Promise<CerbanimoResult> {
+    const auth0Id = this.auth0IdForProject(action.payload);
+    if (!auth0Id) {
+      return {
+        ok: false,
+        error: "Kamiya cannot create this Cerbanimo project because the Auth0 user id is missing. Log out and log back in through the Cerbanimo Auth0 bridge, then try again."
+      };
+    }
+
+    const createPayload = {
+      name: action.payload.name,
+      description: action.payload.description,
+      tags: Array.isArray(action.payload.tags) ? action.payload.tags : [],
+      auth0_id: auth0Id,
+      outcomeStatement: action.payload.outcomeStatement,
+      due_date: action.payload.due_date ?? null,
+      location: action.payload.location ?? null,
+      auto_assign: Boolean(action.payload.auto_assign),
+      is_service: Boolean(action.payload.is_service),
+      service_visibility: action.payload.service_visibility ?? ["private"],
+      service_price: action.payload.service_price ?? 0
+    };
+
+    const created = await this.request("/projects/create", "POST", createPayload);
+    if (!created.ok) return created;
+
+    if (action.payload.autoGeneratePlan === false) return created;
+
+    const project = (created.data ?? {}) as Record<string, unknown>;
+    const projectId = project.id;
+    if (!projectId) return created;
+
+    const generated = await this.request("/projects/auto-generate", "POST", { projectId });
+    return {
+      ok: true,
+      data: {
+        project,
+        autoGenerate: generated.ok ? generated.data : { ok: false, error: generated.error }
+      }
     };
   }
 
@@ -240,10 +284,18 @@ export class CerbanimoClient {
     if (!response.ok) {
       return {
         ok: false,
-        error: data?.error ?? `${response.status} ${response.statusText}`
+        error: data?.message ?? data?.error ?? `${response.status} ${response.statusText}`
       };
     }
 
     return { ok: true, data };
+  }
+
+  private auth0IdForProject(payload: Record<string, unknown>): string | undefined {
+    const explicit = payload.auth0_id ?? payload.auth0Id;
+    if (typeof explicit === "string" && explicit.trim()) return explicit;
+    if (this.auth.userId?.trim()) return this.auth.userId;
+    if (this.auth.externalUserId?.trim()) return this.auth.externalUserId;
+    return undefined;
   }
 }

@@ -34,14 +34,14 @@ export function buildPlanningPrompt(message: string, draft: PlanningDraft | unde
   return `Analyze this quest/project idea and update the planning draft.
 
 Required project fields:
-- title
-- mission
-- desiredOutcome
+- title: Cerbanimo project name
+- mission: Cerbanimo project description
+- desiredOutcome: Cerbanimo outcomeStatement, the real-world effect
+
+Optional but useful:
 - audience
 - timeline
 - successCriteria
-
-Optional but useful:
 - constraints
 
 Current draft:

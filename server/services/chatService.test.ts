@@ -44,4 +44,27 @@ describe("handleChatTurn", () => {
     expect(second.session.pendingAction?.kind).toBe("create_project");
     expect(second.session.planningDraft?.mission).toContain("help middle school students");
   });
+
+  it("previews project creation once Cerbanimo-required fields are present", async () => {
+    const response = await handleChatTurn({
+      message:
+        "/create project named Neighborhood Garden, description is Build raised beds and organize volunteers, outcome is residents have fresh produce",
+      history: [],
+      session: {},
+      auth: {
+        isLoggedIn: true,
+        userId: "auth0|user-123",
+        displayName: "Glaed",
+        permissions: ["projects:create"]
+      }
+    });
+
+    expect(response.message.content).toContain("Please confirm");
+    expect(response.session.pendingAction?.kind).toBe("create_project");
+    expect(response.session.pendingAction?.payload).toMatchObject({
+      name: "Neighborhood Garden",
+      description: "Build raised beds and organize volunteers",
+      outcomeStatement: "residents have fresh produce"
+    });
+  });
 });
