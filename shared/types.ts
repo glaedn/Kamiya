@@ -173,6 +173,8 @@ export interface ActionExecutionRecord {
 }
 
 export interface KamiyaSessionState {
+  chatId?: number;
+  chatName?: string;
   pendingAction?: ActionPreview;
   planningDraft?: PlanningDraft;
   planningDeadlinePrompted?: boolean;
@@ -209,6 +211,20 @@ export interface ChatTurnRequest {
 
 export interface ChatTurnResponse {
   message: ChatMessage;
+  session: KamiyaSessionState;
+}
+
+export interface KamiyaSavedChatSummary {
+  id: number;
+  name: string;
+  createdAt?: string;
+  updatedAt?: string;
+  messageCount?: number;
+}
+
+export interface KamiyaSavedChat extends KamiyaSavedChatSummary {
+  userId?: number;
+  messages: ChatMessage[];
   session: KamiyaSessionState;
 }
 

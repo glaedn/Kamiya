@@ -1,4 +1,4 @@
-import type { ActionPreview, CerbanimoResult, KamiyaAuthContext } from "../../shared/types";
+import type { ActionPreview, CerbanimoResult, ChatMessage, KamiyaAuthContext, KamiyaSavedChat, KamiyaSavedChatSummary, KamiyaSessionState } from "../../shared/types";
 
 export class CerbanimoClient {
   private readonly apiUrl: string;
@@ -71,13 +71,48 @@ export class CerbanimoClient {
     if (!projectId) return created;
 
     const generated = await this.request("/projects/auto-generate", "POST", { projectId });
+    const tasks = await this.request(`/tasks/p/${encodeURIComponent(String(projectId))}`, "GET");
+    const activeTasks = Array.isArray(tasks.data)
+      ? tasks.data.filter((task) => isActiveTask((task as Record<string, unknown>).status))
+      : [];
+
     return {
       ok: true,
       data: {
         project,
-        autoGenerate: generated.ok ? generated.data : { ok: false, error: generated.error }
+        autoGenerate: generated.ok ? generated.data : { ok: false, error: generated.error },
+        activeTasks
       }
     };
+  }
+
+  async saveChat(input: {
+    chatId?: number;
+    name: string;
+    messages: ChatMessage[];
+    session: KamiyaSessionState;
+  }): Promise<CerbanimoResult<{ chat: KamiyaSavedChat }>> {
+    if (!this.apiUrl || !this.token) {
+      return { ok: false, error: "Cerbanimo chat storage is not configured." };
+    }
+
+    return this.request("/kamiya/chats", "POST", input) as Promise<CerbanimoResult<{ chat: KamiyaSavedChat }>>;
+  }
+
+  async listChats(): Promise<CerbanimoResult<{ chats: KamiyaSavedChatSummary[] }>> {
+    if (!this.apiUrl || !this.token) {
+      return { ok: false, error: "Cerbanimo chat storage is not configured." };
+    }
+
+    return this.request("/kamiya/chats", "GET") as Promise<CerbanimoResult<{ chats: KamiyaSavedChatSummary[] }>>;
+  }
+
+  async loadChat(chatId: number): Promise<CerbanimoResult<{ chat: KamiyaSavedChat }>> {
+    if (!this.apiUrl || !this.token) {
+      return { ok: false, error: "Cerbanimo chat storage is not configured." };
+    }
+
+    return this.request(`/kamiya/chats/${encodeURIComponent(String(chatId))}`, "GET") as Promise<CerbanimoResult<{ chat: KamiyaSavedChat }>>;
   }
 
   async search(query: string): Promise<CerbanimoResult> {
@@ -298,4 +333,8 @@ export class CerbanimoClient {
     if (this.auth.externalUserId?.trim()) return this.auth.externalUserId;
     return undefined;
   }
+}
+
+function isActiveTask(status: unknown): boolean {
+  return typeof status === "string" && /^(active|urgent)/i.test(status);
 }

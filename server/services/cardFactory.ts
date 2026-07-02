@@ -57,11 +57,11 @@ export function taskListCard(items: Array<Record<string, unknown>>, mocked?: boo
     subtitle: `${items.length} task${items.length === 1 ? "" : "s"}`,
     items: items.map((item) => ({
       id: String(item.id ?? crypto.randomUUID()),
-      title: String(item.title ?? "Untitled task"),
-      subtitle: String(item.project ?? item.type ?? "Cerbanimo task"),
+      title: String(item.title ?? item.name ?? "Untitled task"),
+      subtitle: String(item.project ?? item.project_name ?? item.type ?? "Cerbanimo task"),
       status: String(item.status ?? "open"),
       metadata: {
-        reward: typeof item.reward === "number" ? item.reward : 0
+        reward: typeof item.reward === "number" ? item.reward : typeof item.reward_tokens === "number" ? item.reward_tokens : 0
       }
     })),
     actions: [

@@ -21,8 +21,14 @@ import { previewAutomation, previewProjectCreation, previewTaskSubmission } from
 import { routeIntent } from "./intentRouter";
 import { analyzePlanning } from "./planningService";
 import { parseModeCommand, shouldShowModes } from "./modeService";
+import { generateChatName } from "./chatTitleService";
 
 export async function handleChatTurn(request: ChatTurnRequest): Promise<ChatTurnResponse> {
+  const response = await buildChatTurnResponse(request);
+  return persistChatTurn(request, response);
+}
+
+async function buildChatTurnResponse(request: ChatTurnRequest): Promise<ChatTurnResponse> {
   const message = request.message.trim();
 
   if (request.session.pendingAction && isConfirmation(message)) {
@@ -199,6 +205,36 @@ export async function handleChatTurn(request: ChatTurnRequest): Promise<ChatTurn
   );
 }
 
+async function persistChatTurn(request: ChatTurnRequest, response: ChatTurnResponse): Promise<ChatTurnResponse> {
+  if (request.channel && request.channel !== "web") return response;
+  if (!request.auth.isLoggedIn) return response;
+
+  const messages = [...request.history, response.message];
+  const chatName = await generateChatName(messages);
+  const session = {
+    ...response.session,
+    chatId: request.session.chatId,
+    chatName
+  };
+
+  const saved = await new CerbanimoClient(request.auth).saveChat({
+    chatId: session.chatId,
+    name: chatName,
+    messages,
+    session
+  });
+  const savedChat = saved.ok ? saved.data?.chat : undefined;
+
+  return {
+    ...response,
+    session: {
+      ...session,
+      chatId: typeof savedChat?.id === "number" ? savedChat.id : session.chatId,
+      chatName: savedChat?.name ?? session.chatName
+    }
+  };
+}
+
 export async function handleChannelTurn(channelRequest: {
   channel: ChatTurnRequest["channel"];
   text: string;
@@ -248,10 +284,13 @@ async function executePendingAction(request: ChatTurnRequest): Promise<ChatTurnR
   };
   const actionHistory = [record, ...(request.session.actionHistory ?? [])].slice(0, 8);
 
+  const activeTasks = activeTasksFromResult(result.data);
   return respond(
-    result.mocked
-      ? "Confirmed. I simulated the Cerbanimo call because live API credentials are not configured yet."
-      : "Confirmed. I sent the action to Cerbanimo and logged the result.",
+    action.kind === "create_project" && activeTasks.length
+      ? `Confirmed. I created the project in Cerbanimo and found ${activeTasks.length} active task${activeTasks.length === 1 ? "" : "s"} ready now:\n\n${formatActiveTasks(activeTasks)}`
+      : result.mocked
+        ? "Confirmed. I simulated the Cerbanimo call because live API credentials are not configured yet."
+        : "Confirmed. I sent the action to Cerbanimo and logged the result.",
     {
       ...request.session,
       pendingAction: undefined,
@@ -260,7 +299,7 @@ async function executePendingAction(request: ChatTurnRequest): Promise<ChatTurnR
       actionHistory
     },
     undefined,
-    [actionQueueCard(actionHistory, result.mocked)]
+    activeTasks.length ? [taskListCard(activeTasks, Boolean(result.mocked)), actionQueueCard(actionHistory, result.mocked)] : [actionQueueCard(actionHistory, result.mocked)]
   );
 }
 
@@ -314,4 +353,23 @@ function isProjectPlanningTurn(message: string, intent: ChatMessage["intent"], p
   if (intent.next_action !== "ask_missing_inputs") return false;
   if (message.trim().toLowerCase().startsWith("/create")) return true;
   return intent.intent === "administration" && /\b(project|quest|plan|create|start)\b/i.test(message);
+}
+
+function activeTasksFromResult(data: unknown): Array<Record<string, unknown>> {
+  if (!data || typeof data !== "object") return [];
+  const tasks = (data as { activeTasks?: unknown }).activeTasks;
+  return Array.isArray(tasks) ? (tasks as Array<Record<string, unknown>>) : [];
+}
+
+function formatActiveTasks(tasks: Array<Record<string, unknown>>): string {
+  return tasks
+    .slice(0, 8)
+    .map((task, index) => {
+      const title = task.name ?? task.title ?? `Task ${index + 1}`;
+      const status = task.status ? ` (${task.status})` : "";
+      const skill = task.skill_name ? ` - ${task.skill_name}` : "";
+      const reward = task.reward_tokens ? ` - ${task.reward_tokens} tokens` : "";
+      return `${index + 1}. ${title}${status}${skill}${reward}`;
+    })
+    .join("\n");
 }

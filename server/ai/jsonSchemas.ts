@@ -112,3 +112,11 @@ export const planningResponseSchema = {
     "ready_to_create"
   ]
 };
+
+export const chatTitleResponseSchema = {
+  type: "object",
+  properties: {
+    chatName: { type: "string" }
+  },
+  required: ["chatName"]
+};

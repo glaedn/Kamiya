@@ -57,3 +57,20 @@ ${message}
 
 Ask only for missing required information. If all required fields are present, mark ready_to_create true.`;
 }
+
+export function buildChatTitlePrompt(messages: Array<{ role: string; content: string }>): string {
+  const transcript = messages
+    .slice(-8)
+    .map((message) => `${message.role}: ${message.content}`)
+    .join("\n");
+
+  return `Name this Kamiya chat in 3 to 6 words.
+
+Rules:
+- Return a concise title only in the chatName JSON field.
+- Prefer the user's goal, project, task, or topic.
+- Do not include quotation marks, punctuation flourishes, or the word "chat" unless essential.
+
+Transcript:
+${transcript}`;
+}

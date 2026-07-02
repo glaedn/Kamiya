@@ -1,18 +1,19 @@
-import { FormEvent, useEffect, useMemo, useRef, useState } from "react";
+import { FormEvent, useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { Bot, LogIn, LogOut, Send, Settings, Slash, Sparkles } from "lucide-react";
-import type { CardAction, ChatMessage, KamiyaAuthContext, KamiyaSessionState } from "../shared/types";
+import type { CardAction, ChatMessage, KamiyaAuthContext, KamiyaSavedChatSummary, KamiyaSessionState } from "../shared/types";
 import { slashCommands } from "../shared/commands";
 import { CommandMenu } from "./components/CommandMenu";
 import { MessageBubble } from "./components/MessageBubble";
 import { SettingsPanel } from "./components/SettingsPanel";
-import { makeUserMessage, sendChatTurn } from "./lib/kamiyaApi";
-import { loadAuth, loadSession, saveAuth, saveSession } from "./lib/storage";
+import { listSavedChats, loadSavedChat, makeUserMessage, sendChatTurn } from "./lib/kamiyaApi";
+import { loadAuth, saveAuth } from "./lib/storage";
 import { attachCerbanimoAuth, clearCerbanimoSession, hydrateAuthFromCerbanimoSession, startCerbanimoLogin } from "./lib/authBridge";
 
 export default function App() {
   const [auth, setAuth] = useState<KamiyaAuthContext>(() => hydrateAuthFromCerbanimoSession(loadAuth()));
-  const [session, setSession] = useState<KamiyaSessionState>(() => loadSession());
+  const [session, setSession] = useState<KamiyaSessionState>({});
   const [messages, setMessages] = useState<ChatMessage[]>(() => [introMessage(hydrateAuthFromCerbanimoSession(loadAuth()).isLoggedIn)]);
+  const [savedChats, setSavedChats] = useState<KamiyaSavedChatSummary[]>([]);
   const [input, setInput] = useState("");
   const [isSending, setIsSending] = useState(false);
   const [isLoggingIn, setIsLoggingIn] = useState(false);
@@ -35,12 +36,16 @@ export default function App() {
   }, [auth.isLoggedIn]);
 
   useEffect(() => {
-    saveSession(session);
-  }, [session]);
-
-  useEffect(() => {
     endRef.current?.scrollIntoView({ behavior: "smooth" });
   }, [messages]);
+
+  const refreshSavedChats = useCallback(async () => {
+    try {
+      setSavedChats(await listSavedChats(attachCerbanimoAuth(auth)));
+    } catch {
+      setSavedChats([]);
+    }
+  }, [auth]);
 
   async function submitMessage(value = input) {
     const trimmed = value.trim();
@@ -61,6 +66,7 @@ export default function App() {
       });
       setSession(response.session);
       setMessages((current) => [...current, response.message]);
+      void refreshSavedChats();
     } catch (error) {
       const content = error instanceof Error ? error.message : "Kamiya hit an unknown error.";
       setMessages((current) => [
@@ -110,11 +116,53 @@ export default function App() {
 
   function handleLogout() {
     clearCerbanimoSession();
+    setSavedChats([]);
+    startNewChat(false);
     setAuth((current) => ({
       isLoggedIn: false,
       displayName: current.displayName,
       permissions: current.permissions ?? ["projects:create", "tasks:submit", "automation:create"]
     }));
+  }
+
+  function startNewChat(useCurrentAuth = true) {
+    const isLoggedIn = useCurrentAuth ? auth.isLoggedIn : false;
+    setSession({});
+    setMessages([introMessage(isLoggedIn)]);
+    setInput("");
+  }
+
+  useEffect(() => {
+    if (!auth.isLoggedIn) {
+      setSavedChats([]);
+      return;
+    }
+
+    void refreshSavedChats();
+  }, [auth.isLoggedIn, auth.userId, refreshSavedChats]);
+
+  async function handleLoadChat(chatIdValue: string) {
+    if (!chatIdValue) {
+      startNewChat();
+      return;
+    }
+
+    try {
+      const chat = await loadSavedChat(attachCerbanimoAuth(auth), Number(chatIdValue));
+      setSession({ ...(chat.session ?? {}), chatId: chat.id, chatName: chat.name });
+      setMessages(chat.messages?.length ? chat.messages : [introMessage(auth.isLoggedIn)]);
+    } catch (error) {
+      const content = error instanceof Error ? error.message : "Failed to load that Kamiya chat.";
+      setMessages((current) => [
+        ...current,
+        {
+          id: crypto.randomUUID(),
+          role: "assistant",
+          content,
+          createdAt: new Date().toISOString()
+        }
+      ]);
+    }
   }
 
   return (
@@ -132,6 +180,22 @@ export default function App() {
           </div>
 
           <div className="topbar-actions">
+            <select
+              className="chat-select"
+              value={session.chatId ?? ""}
+              onChange={(event) => void handleLoadChat(event.target.value)}
+              aria-label="Select Kamiya chat"
+            >
+              <option value="">New chat</option>
+              {savedChats.map((chat) => (
+                <option key={chat.id} value={chat.id}>
+                  {chat.name}
+                </option>
+              ))}
+            </select>
+            <button className="secondary auth-button" type="button" onClick={() => startNewChat()}>
+              New
+            </button>
             <span className={auth.isLoggedIn ? "status connected" : "status"}>{statusLabel}</span>
             <button className="secondary auth-button" type="button" onClick={auth.isLoggedIn ? handleLogout : handleLogin} disabled={isLoggingIn}>
               {auth.isLoggedIn ? <LogOut size={16} /> : <LogIn size={16} />}

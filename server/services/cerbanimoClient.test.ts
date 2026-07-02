@@ -17,6 +17,10 @@ describe("CerbanimoClient", () => {
       .mockResolvedValueOnce({
         ok: true,
         json: async () => ({ success: true, tasks: [] })
+      })
+      .mockResolvedValueOnce({
+        ok: true,
+        json: async () => []
       });
     vi.stubGlobal("fetch", fetchMock);
 

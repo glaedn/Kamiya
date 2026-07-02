@@ -6,6 +6,7 @@ import path from "node:path";
 import { z } from "zod";
 import type { ChatTurnRequest } from "../shared/types";
 import { handleChannelTurn, handleChatTurn } from "./services/chatService";
+import { CerbanimoClient } from "./services/cerbanimoClient";
 import { extractString, extractText, toChannelOutbound } from "./services/channelAdapter";
 
 const app = express();
@@ -36,6 +37,14 @@ const chatTurnSchema = z.object({
   auth: authSchema
 });
 
+const chatAuthSchema = z.object({
+  auth: authSchema
+});
+
+const loadChatSchema = chatAuthSchema.extend({
+  chatId: z.number()
+});
+
 app.get("/api/health", (_req, res) => {
   res.json({
     ok: true,
@@ -51,6 +60,28 @@ app.post("/api/chat/turn", async (req, res, next) => {
     const parsed = chatTurnSchema.parse(req.body) as ChatTurnRequest;
     const response = await handleChatTurn(parsed);
     res.json(response);
+  } catch (error) {
+    next(error);
+  }
+});
+
+app.post("/api/chats/list", async (req, res, next) => {
+  try {
+    const parsed = chatAuthSchema.parse(req.body);
+    const result = await new CerbanimoClient(parsed.auth).listChats();
+    if (!result.ok) return res.status(400).json({ ok: false, error: result.error });
+    res.json(result.data);
+  } catch (error) {
+    next(error);
+  }
+});
+
+app.post("/api/chats/load", async (req, res, next) => {
+  try {
+    const parsed = loadChatSchema.parse(req.body);
+    const result = await new CerbanimoClient(parsed.auth).loadChat(parsed.chatId);
+    if (!result.ok) return res.status(400).json({ ok: false, error: result.error });
+    res.json(result.data);
   } catch (error) {
     next(error);
   }
