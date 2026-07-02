@@ -187,9 +187,10 @@ export default function App() {
               aria-label="Select Kamiya chat"
             >
               <option value="">New chat</option>
+              {savedChats.length ? null : <option disabled>No saved chats yet</option>}
               {savedChats.map((chat) => (
                 <option key={chat.id} value={chat.id}>
-                  {chat.name}
+                  {chat.name}{chat.messageCount ? ` (${chat.messageCount})` : ""}
                 </option>
               ))}
             </select>
@@ -297,7 +298,7 @@ export default function App() {
           <h2>Planning Draft</h2>
           {session.planningDraft ? (
             <dl className="draft-list">
-              {Object.entries(session.planningDraft).map(([key, value]) => (
+              {projectDraftEntries(session.planningDraft).map(([key, value]) => (
                 <div key={key}>
                   <dt>{humanize(key)}</dt>
                   <dd>{value}</dd>
@@ -344,5 +345,19 @@ function introMessage(isLoggedIn: boolean): ChatMessage {
 }
 
 function humanize(key: string): string {
-  return key.replace(/([A-Z])/g, " $1").replace(/^./, (char) => char.toUpperCase());
+  const labels: Record<string, string> = {
+    title: "Title",
+    mission: "Description",
+    desiredOutcome: "Desired outcome",
+    timeline: "Deadline",
+    constraints: "Constraints"
+  };
+  return labels[key] ?? key.replace(/([A-Z])/g, " $1").replace(/^./, (char) => char.toUpperCase());
+}
+
+function projectDraftEntries(draft: KamiyaSessionState["planningDraft"]): Array<[string, string]> {
+  if (!draft) return [];
+  return (["title", "mission", "desiredOutcome", "timeline", "constraints"] as const)
+    .map((key) => [key, draft[key]] as [string, string | undefined])
+    .filter((entry): entry is [string, string] => Boolean(entry[1]));
 }

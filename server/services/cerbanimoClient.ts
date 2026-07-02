@@ -8,7 +8,7 @@ export class CerbanimoClient {
   constructor(auth: KamiyaAuthContext) {
     this.auth = auth;
     this.apiUrl = process.env.KAMIYA_CERBANIMO_API_URL || auth.cerbanimoApiUrl || "";
-    this.token = process.env.KAMIYA_CERBANIMO_BEARER_TOKEN || auth.cerbanimoToken;
+    this.token = auth.cerbanimoToken || process.env.KAMIYA_CERBANIMO_BEARER_TOKEN;
   }
 
   async executeAction(action: ActionPreview): Promise<CerbanimoResult> {
@@ -72,9 +72,8 @@ export class CerbanimoClient {
 
     const generated = await this.request("/projects/auto-generate", "POST", { projectId });
     const tasks = await this.request(`/tasks/p/${encodeURIComponent(String(projectId))}`, "GET");
-    const activeTasks = Array.isArray(tasks.data)
-      ? tasks.data.filter((task) => isActiveTask((task as Record<string, unknown>).status))
-      : [];
+    const taskItems = extractItems(tasks.data);
+    const activeTasks = taskItems.filter((task) => isActiveTask(task.status));
 
     return {
       ok: true,
@@ -336,5 +335,21 @@ export class CerbanimoClient {
 }
 
 function isActiveTask(status: unknown): boolean {
-  return typeof status === "string" && /^(active|urgent)/i.test(status);
+  return typeof status === "string" && /^(active|urgent|ready|open|available|in_progress)$/i.test(status);
+}
+
+function extractItems(data: unknown): Array<Record<string, unknown>> {
+  if (Array.isArray(data)) return data.filter(isRecord);
+  if (!isRecord(data)) return [];
+
+  for (const key of ["tasks", "items", "results", "rows", "data"]) {
+    const value = data[key];
+    if (Array.isArray(value)) return value.filter(isRecord);
+  }
+
+  return [];
+}
+
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return Boolean(value) && typeof value === "object" && !Array.isArray(value);
 }

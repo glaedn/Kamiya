@@ -42,12 +42,14 @@ Required project fields:
 - desiredOutcome: Cerbanimo outcomeStatement, the real-world effect
 
 Optional but useful:
-- audience
 - timeline
-- successCriteria
 - constraints
+- audience
+- successCriteria
 
-If the user gives a relative deadline such as "tomorrow", "next week", or "next month", convert it into a strict ISO date string in draft.timeline using the server date/time above.
+Infer title, mission, desiredOutcome, and timeline from natural language whenever the text gives you enough evidence. For example, "create a local Watertown weekly get together around Magic the Gathering starting in 4 weeks" can produce a title, description, desired outcome, and a strict timeline without asking follow-up questions.
+
+If the user gives a relative deadline or start time such as "tomorrow", "next week", "next month", "in 4 weeks", or "starting in 4 weeks", convert it into a strict ISO date string in draft.timeline using the server date/time above.
 
 Current draft:
 ${JSON.stringify(draft ?? {})}

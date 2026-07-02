@@ -20,17 +20,19 @@ export function actionPreviewCard(action: ActionPreview): ResponseCard {
 }
 
 export function questSummaryCard(draft: PlanningDraft): ResponseCard {
+  const metadata = compactMetadata({
+    desiredOutcome: draft.desiredOutcome ?? "",
+    deadline: draft.timeline ?? "",
+    constraints: draft.constraints ?? ""
+  } as NonNullable<ResponseCard["metadata"]>);
+
   return {
     id: crypto.randomUUID(),
     kind: "quest_summary",
     title: draft.title ?? "New quest",
     subtitle: draft.timeline,
     body: draft.mission,
-    metadata: {
-      outcome: draft.desiredOutcome ?? "",
-      audience: draft.audience ?? "",
-      success: draft.successCriteria ?? ""
-    }
+    metadata
   };
 }
 
@@ -240,4 +242,12 @@ export function helpCard(): ResponseCard {
       { id: "/automation", title: "/automation", subtitle: "Preview an auditable workflow." }
     ]
   };
+}
+
+function compactMetadata(metadata: NonNullable<ResponseCard["metadata"]>): ResponseCard["metadata"] | undefined {
+  const entries = Object.entries(metadata).filter(([, value]) => {
+    if (Array.isArray(value)) return value.length > 0;
+    return value !== undefined && value !== null && String(value).trim().length > 0;
+  });
+  return entries.length ? Object.fromEntries(entries) : undefined;
 }

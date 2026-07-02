@@ -17,11 +17,8 @@ export async function analyzePlanning(message: string, currentDraft?: PlanningDr
 
   return normalizePlanning({
     ...aiAnalysis,
-    draft: {
-      ...(aiAnalysis.draft ?? {}),
-      ...compactDraft(localAnalysis.draft)
-    },
-    fulfilled_fields: [...(aiAnalysis.fulfilled_fields ?? []), ...localAnalysis.fulfilled_fields]
+    draft: mergeDrafts(localAnalysis.draft, aiAnalysis.draft),
+    fulfilled_fields: [...localAnalysis.fulfilled_fields, ...(aiAnalysis.fulfilled_fields ?? [])]
   });
 }
 
@@ -37,7 +34,7 @@ function analyzePlanningLocally(message: string, currentDraft?: PlanningDraft, s
   if (explicitDescription) draft.mission = explicitDescription;
   if (!explicitDescription && explicitMission) draft.mission = explicitMission;
   if (!draft.mission && clean) draft.mission = clean;
-  if (!draft.desiredOutcome) draft.desiredOutcome = extractOutcome(clean);
+  if (!draft.desiredOutcome) draft.desiredOutcome = extractOutcome(clean) ?? inferOutcome(clean);
   if (!draft.timeline) draft.timeline = extractTimeline(clean, serverNow);
   if (!draft.audience) draft.audience = extractAudience(clean);
   if (!draft.successCriteria) draft.successCriteria = extractSuccessCriteria(clean, draft.desiredOutcome);
@@ -87,14 +84,30 @@ function compactDraft(draft: PlanningDraft): PlanningDraft {
   return Object.fromEntries(Object.entries(draft).filter(([, value]) => Boolean(value))) as PlanningDraft;
 }
 
+function mergeDrafts(localDraft: PlanningDraft, aiDraft?: PlanningDraft): PlanningDraft {
+  const compactLocal = compactDraft(localDraft);
+  const compactAi = compactDraft(aiDraft ?? {});
+  return {
+    ...compactLocal,
+    ...compactAi
+  };
+}
+
 function titleFromMessage(message: string): string {
+  const localCommunityMatch = message.match(/\blocal\s+([A-Za-z][\w\s'-]{1,50}?)\s+(?:weekly\s+)?(?:get together|meetup|meeting|club|group)\s+(?:around|for|about)\s+(.+?)(?:\s+(?:starting|in|within|by|so)\b|$)/i);
+  if (localCommunityMatch?.[1] && localCommunityMatch?.[2]) {
+    return toTitle(`${localCommunityMatch[1].trim()} Weekly ${shortTopic(localCommunityMatch[2])} meetup`);
+  }
+
   const projectForMatch = message.match(/^project\s+for\s+(?:a\s+|an\s+|the\s+)?(.+?)(?:\s+(?:today|tomorrow|this week|next week|this month|next month|this quarter|next quarter|this year|next year|by\b|so\b)|$)/i);
   if (projectForMatch?.[1]) return toTitle(projectForMatch[1]);
 
   const normalized = message
+    .replace(/^create\s+(?:a\s+)?(?:project|quest)\s+(?:for|to)?\s*/i, "")
     .replace(/\bfor\b.+$/i, "")
     .replace(/\bso\b.+$/i, "")
-    .replace(/\b(next|this)\s+(week|month|quarter|year)\b.+$/i, "")
+    .replace(/\b(?:starting\s+)?(?:in\s+)?\d+\s+(?:days?|weeks?|months?)\b.+$/i, "")
+    .replace(/\b(next|this)\s+(week|month|quarter|year)\b.*$/i, "")
     .replace(/[.?!]+$/, "")
     .trim();
   return normalized.length > 54 ? `${normalized.slice(0, 51)}...` : normalized;
@@ -110,7 +123,10 @@ function toTitle(value: string): string {
     .replace(/[.?!]+$/, "")
     .trim()
     .split(/\s+/)
-    .map((word) => (word.length <= 3 ? word.toLowerCase() : `${word[0]?.toUpperCase() ?? ""}${word.slice(1)}`))
+    .map((word) => {
+      if (/[A-Z]/.test(word.slice(1))) return word;
+      return word.length <= 3 ? word.toLowerCase() : `${word[0]?.toUpperCase() ?? ""}${word.slice(1)}`;
+    })
     .join(" ");
 }
 
@@ -132,8 +148,20 @@ function extractOutcome(message: string): string | undefined {
   return outcomeMatch?.[1]?.trim();
 }
 
+function inferOutcome(message: string): string | undefined {
+  const localCommunityMatch = message.match(/\blocal\s+([A-Za-z][\w\s'-]{1,50}?)\s+(?:weekly\s+)?(?:get together|meetup|meeting|club|group)\s+(?:around|for|about)\s+(.+?)(?:\s+(?:starting|in|within|by)\b|$)/i);
+  if (localCommunityMatch?.[2]) {
+    return `Build a local community around weekly ${shortTopic(localCommunityMatch[2])} meetups`;
+  }
+
+  const createMatch = message.match(/\b(?:create|start|launch|build)\s+(?:a\s+|an\s+|the\s+)?(.+?)(?:\s+(?:starting|in|within|by)\b|$)/i);
+  if (createMatch?.[1]) return `Successfully ${message.trim().toLowerCase().startsWith("build") ? "build" : "create"} ${createMatch[1].trim()}`;
+
+  return undefined;
+}
+
 function extractTimeline(message: string, serverNow: Date): string | undefined {
-  const timelineMatch = message.match(/\b(today|tomorrow|this week|next week|this month|next month|this quarter|next quarter|this year|next year|by\s+[^,.]+|\d{4}-\d{2}-\d{2})\b/i);
+  const timelineMatch = message.match(/\b(today|tomorrow|this week|next week|this month|next month|this quarter|next quarter|this year|next year|(?:starting\s+)?in\s+\d+\s+(?:days?|weeks?|months?)|within\s+\d+\s+(?:days?|weeks?|months?)|by\s+[^,.]+|\d{4}-\d{2}-\d{2})\b/i);
   return timelineMatch?.[1] ? resolveTimeline(timelineMatch[1].trim(), serverNow) : undefined;
 }
 
@@ -152,6 +180,14 @@ function resolveTimeline(value: string, serverNow: Date): string | undefined {
   if (lower === "next quarter") return formatDate(endOfQuarter(start, 1));
   if (lower === "this year") return `${start.getFullYear()}-12-31`;
   if (lower === "next year") return `${start.getFullYear() + 1}-12-31`;
+
+  const relativeMatch = lower.match(/^(?:starting\s+)?(?:in|within)\s+(\d+)\s+(days?|weeks?|months?)$/);
+  if (relativeMatch?.[1] && relativeMatch?.[2]) {
+    const amount = Number(relativeMatch[1]);
+    if (relativeMatch[2].startsWith("day")) return formatDate(addDays(start, amount));
+    if (relativeMatch[2].startsWith("week")) return formatDate(addDays(start, amount * 7));
+    if (relativeMatch[2].startsWith("month")) return formatDate(addMonths(start, amount));
+  }
 
   const byMatch = lower.match(/^by\s+(.+)$/);
   if (!byMatch?.[1]) return value;
@@ -201,6 +237,10 @@ function endOfMonth(value: Date, monthsFromNow: number): Date {
   return new Date(value.getFullYear(), value.getMonth() + monthsFromNow + 1, 0);
 }
 
+function addMonths(value: Date, months: number): Date {
+  return new Date(value.getFullYear(), value.getMonth() + months, value.getDate());
+}
+
 function endOfQuarter(value: Date, quartersFromNow: number): Date {
   const quarterStartMonth = Math.floor(value.getMonth() / 3) * 3;
   return new Date(value.getFullYear(), quarterStartMonth + (quartersFromNow + 1) * 3, 0);
@@ -226,6 +266,13 @@ function extractSuccessCriteria(message: string, outcome?: string): string | und
   if (successMatch?.[1]) return successMatch[1].trim();
   if (outcome && /\b(\d+|one|two|three|four|five|six|seven|eight|nine|ten|dozen|hundred)\b/i.test(outcome)) return outcome;
   return undefined;
+}
+
+function shortTopic(value: string): string {
+  return value
+    .replace(/\bMagic the Gathering\b/i, "MtG")
+    .replace(/[.?!]+$/, "")
+    .trim();
 }
 
 function questionForField(field: keyof PlanningDraft): string {

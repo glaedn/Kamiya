@@ -1,7 +1,11 @@
-import { describe, expect, it } from "vitest";
+import { afterEach, describe, expect, it, vi } from "vitest";
 import { handleChatTurn } from "./chatService";
 
 describe("handleChatTurn", () => {
+  afterEach(() => {
+    vi.unstubAllGlobals();
+  });
+
   it("routes /create project into the planning workflow instead of a generic fallback", async () => {
     const response = await handleChatTurn({
       message: "/create project for a youth coding club",
@@ -108,6 +112,66 @@ describe("handleChatTurn", () => {
     expect(preview.message.content).toContain("Please confirm");
     expect(preview.session.pendingAction?.payload.due_date).toMatch(/^\d{4}-\d{2}-\d{2}$/);
     expect(preview.session.pendingAction?.payload.due_date).toBe(lastDayOfNextMonth());
+  });
+
+  it("summarizes the created project and active tasks after confirmation", async () => {
+    const fetchMock = vi
+      .fn()
+      .mockResolvedValueOnce({
+        ok: true,
+        json: async () => ({
+          id: 42,
+          name: "Watertown Weekly MtG Meetup",
+          description: "Create a local Watertown weekly get together",
+          outcomeStatement: "Build a local community around weekly MtG meetups"
+        })
+      })
+      .mockResolvedValueOnce({
+        ok: true,
+        json: async () => ({ success: true })
+      })
+      .mockResolvedValueOnce({
+        ok: true,
+        json: async () => ({ tasks: [{ id: 1, name: "Reserve a table", status: "active", reward_tokens: 10 }] })
+      })
+      .mockResolvedValue({
+        ok: true,
+        json: async () => ({ chat: { id: 1, name: "Watertown Weekly MtG Meetup", messages: [], session: {} } })
+      });
+    vi.stubGlobal("fetch", fetchMock);
+
+    const preview = await handleChatTurn({
+      message:
+        "/create a local Watertown weekly get together around Magic the Gathering starting in 4 weeks",
+      history: [],
+      session: {},
+      auth: {
+        isLoggedIn: true,
+        userId: "auth0|user-123",
+        cerbanimoApiUrl: "http://localhost:4000",
+        cerbanimoToken: "token",
+        permissions: ["projects:create"]
+      },
+      channel: "sdk"
+    });
+
+    const response = await handleChatTurn({
+      message: "confirm",
+      history: [],
+      session: preview.session,
+      auth: {
+        isLoggedIn: true,
+        userId: "auth0|user-123",
+        cerbanimoApiUrl: "http://localhost:4000",
+        cerbanimoToken: "token",
+        permissions: ["projects:create"]
+      },
+      channel: "sdk"
+    });
+
+    expect(response.message.content).toContain("Watertown Weekly MtG Meetup");
+    expect(response.message.content).toContain("Active tasks ready now");
+    expect(response.message.content).toContain("Reserve a table");
   });
 });
 

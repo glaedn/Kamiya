@@ -285,9 +285,10 @@ async function executePendingAction(request: ChatTurnRequest): Promise<ChatTurnR
   const actionHistory = [record, ...(request.session.actionHistory ?? [])].slice(0, 8);
 
   const activeTasks = activeTasksFromResult(result.data);
+  const createdProject = projectFromResult(result.data);
   return respond(
-    action.kind === "create_project" && activeTasks.length
-      ? `Confirmed. I created the project in Cerbanimo and found ${activeTasks.length} active task${activeTasks.length === 1 ? "" : "s"} ready now:\n\n${formatActiveTasks(activeTasks)}`
+    action.kind === "create_project"
+      ? formatProjectCreatedMessage(createdProject, activeTasks)
       : result.mocked
         ? "Confirmed. I simulated the Cerbanimo call because live API credentials are not configured yet."
         : "Confirmed. I sent the action to Cerbanimo and logged the result.",
@@ -359,6 +360,26 @@ function activeTasksFromResult(data: unknown): Array<Record<string, unknown>> {
   if (!data || typeof data !== "object") return [];
   const tasks = (data as { activeTasks?: unknown }).activeTasks;
   return Array.isArray(tasks) ? (tasks as Array<Record<string, unknown>>) : [];
+}
+
+function projectFromResult(data: unknown): Record<string, unknown> | undefined {
+  if (!data || typeof data !== "object") return undefined;
+  const project = (data as { project?: unknown }).project;
+  return project && typeof project === "object" && !Array.isArray(project) ? (project as Record<string, unknown>) : undefined;
+}
+
+function formatProjectCreatedMessage(project: Record<string, unknown> | undefined, activeTasks: Array<Record<string, unknown>>): string {
+  const title = String(project?.name ?? project?.title ?? "the project");
+  const description = project?.description ? `\nDescription: ${project.description}` : "";
+  const outcome = project?.outcomestatement ?? project?.outcomeStatement ?? project?.outcome_statement;
+  const outcomeLine = outcome ? `\nDesired outcome: ${outcome}` : "";
+  const dueDate = project?.due_date ?? project?.dueDate;
+  const dueLine = dueDate ? `\nDeadline: ${dueDate}` : "";
+  const taskLine = activeTasks.length
+    ? `\n\nActive tasks ready now:\n${formatActiveTasks(activeTasks)}`
+    : "\n\nCerbanimo did not return any active tasks yet. As dependencies clear, Kamiya will surface newly active tasks here.";
+
+  return `Confirmed. I created ${title} in Cerbanimo.${description}${outcomeLine}${dueLine}${taskLine}`;
 }
 
 function formatActiveTasks(tasks: Array<Record<string, unknown>>): string {
