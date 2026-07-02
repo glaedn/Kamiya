@@ -89,7 +89,7 @@ Returns renderable page descriptors/cards for profile, project, task, dashboard,
 
 ## Auth0 Bridge For Kamiya Web Login
 
-Kamiya now expects Cerbanimo to provide a popup auth bridge so the user can log in through Cerbanimo/Auth0 without manually pasting tokens into Kamiya.
+Kamiya now expects Cerbanimo to provide a popup auth bridge so the user can log in through Cerbanimo/Auth0 without manually pasting tokens into Kamiya. On success, Kamiya stores the access token in browser session storage as `cerbanimo_access_token` and keeps the richer bridge payload in its internal session cache.
 
 ### Cerbanimo Routes
 

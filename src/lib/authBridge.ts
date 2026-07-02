@@ -1,6 +1,7 @@
 import type { KamiyaAuthContext } from "../../shared/types";
 
 const authSessionKey = "cerbanimo_auth_bridge";
+const accessTokenKey = "cerbanimo_access_token";
 const defaultCerbanimoOrigin = "http://localhost:3000";
 const defaultCerbanimoApiBase = "http://localhost:4000";
 
@@ -81,8 +82,13 @@ export function attachCerbanimoAuth(auth: KamiyaAuthContext): KamiyaAuthContext 
   };
 }
 
+export function getCerbanimoAccessToken(): string | undefined {
+  return getStoredCerbanimoSession()?.accessToken ?? sessionStorage.getItem(accessTokenKey) ?? undefined;
+}
+
 export function clearCerbanimoSession(): void {
   sessionStorage.removeItem(authSessionKey);
+  sessionStorage.removeItem(accessTokenKey);
 }
 
 export function startCerbanimoLogin(): Promise<LoginResult> {
@@ -137,6 +143,7 @@ export function startCerbanimoLogin(): Promise<LoginResult> {
         user: event.data.user
       };
       sessionStorage.setItem(authSessionKey, JSON.stringify(session));
+      sessionStorage.setItem(accessTokenKey, event.data.accessToken);
 
       resolve({
         session,
