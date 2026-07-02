@@ -48,11 +48,11 @@ export class CerbanimoClient {
     }
 
     const createPayload = {
-      name: action.payload.name,
-      description: action.payload.description,
+      name: limitString(action.payload.name, 100, "Untitled quest"),
+      description: limitString(action.payload.description, 5000, "Created through Kamiya."),
       tags: Array.isArray(action.payload.tags) ? action.payload.tags : [],
       auth0_id: auth0Id,
-      outcomeStatement: action.payload.outcomeStatement,
+      outcomeStatement: limitString(action.payload.outcomeStatement, 5000, String(action.payload.description ?? "Created through Kamiya.")),
       due_date: action.payload.due_date ?? null,
       location: action.payload.location ?? null,
       auto_assign: Boolean(action.payload.auto_assign),
@@ -318,7 +318,7 @@ export class CerbanimoClient {
     if (!response.ok) {
       return {
         ok: false,
-        error: data?.message ?? data?.error ?? `${response.status} ${response.statusText}`
+        error: errorMessageFromResponse(data, response)
       };
     }
 
@@ -352,4 +352,24 @@ function extractItems(data: unknown): Array<Record<string, unknown>> {
 
 function isRecord(value: unknown): value is Record<string, unknown> {
   return Boolean(value) && typeof value === "object" && !Array.isArray(value);
+}
+
+function limitString(value: unknown, maxLength: number, fallback: string): string {
+  const normalized = String(value ?? fallback).trim().replace(/\s+/g, " ") || fallback;
+  if (normalized.length <= maxLength) return normalized;
+  return `${normalized.slice(0, maxLength - 3).trimEnd()}...`;
+}
+
+function errorMessageFromResponse(data: unknown, response: Response): string {
+  if (isRecord(data)) {
+    for (const key of ["message", "error", "detail"]) {
+      const value = data[key];
+      if (typeof value === "string" && value.trim()) return value;
+      if (isRecord(value)) return JSON.stringify(value);
+    }
+    return JSON.stringify(data);
+  }
+
+  if (typeof data === "string" && data.trim()) return data;
+  return `${response.status} ${response.statusText}`;
 }

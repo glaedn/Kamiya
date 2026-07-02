@@ -2,18 +2,21 @@ import type { ActionPreview, AutomationWorkflowKind, PlanningDraft, RoutedIntent
 
 export function previewProjectCreation(draft: PlanningDraft): ActionPreview {
   const tags = normalizeTags(draft);
+  const name = limitText(draft.title ?? "Untitled quest", 100);
+  const description = draft.mission ?? draft.title ?? "Created through Kamiya.";
+  const outcomeStatement = draft.desiredOutcome ?? description;
 
   return {
     id: crypto.randomUUID(),
     kind: "create_project",
-    title: `Create project: ${draft.title ?? "Untitled quest"}`,
-    summary: `Kamiya will create a Cerbanimo project named "${draft.title ?? "Untitled quest"}" with outcome "${draft.desiredOutcome ?? "TBD"}".`,
+    title: `Create project: ${name}`,
+    summary: `Kamiya will create a Cerbanimo project named "${name}" with outcome "${outcomeStatement}".`,
     risk: "low",
     destructive: false,
     payload: {
-      name: draft.title,
-      description: draft.mission,
-      outcomeStatement: draft.desiredOutcome,
+      name,
+      description,
+      outcomeStatement,
       tags: tags.map((name) => ({ name })),
       due_date: normalizeDueDate(draft.timeline),
       auto_assign: false,
@@ -38,6 +41,12 @@ function normalizeTags(draft: PlanningDraft): string[] {
     .filter((value) => value.length > 0 && value.length <= 48);
 
   return [...new Set(values)].slice(0, 8);
+}
+
+function limitText(value: string, maxLength: number): string {
+  const trimmed = value.trim().replace(/\s+/g, " ");
+  if (trimmed.length <= maxLength) return trimmed;
+  return `${trimmed.slice(0, maxLength - 3).trimEnd()}...`;
 }
 
 function normalizeDueDate(value: string | undefined): string | null {

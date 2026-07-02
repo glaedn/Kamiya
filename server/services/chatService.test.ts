@@ -87,6 +87,25 @@ describe("handleChatTurn", () => {
     });
   });
 
+  it("keeps generated Cerbanimo project names within the live database limit", async () => {
+    const response = await handleChatTurn({
+      message:
+        "/create project named " +
+        "A".repeat(160) +
+        ", description is Build a focused local initiative, outcome is the local initiative is operating",
+      history: [],
+      session: { planningDeadlinePrompted: true },
+      auth: {
+        isLoggedIn: true,
+        userId: "auth0|user-123",
+        displayName: "Glaed",
+        permissions: ["projects:create"]
+      }
+    });
+
+    expect(String(response.session.pendingAction?.payload.name)).toHaveLength(100);
+  });
+
   it("converts natural language deadline responses into strict Cerbanimo due dates", async () => {
     const auth = {
       isLoggedIn: true,
