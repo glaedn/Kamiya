@@ -32,7 +32,8 @@ export async function handleChatTurn(request: ChatTurnRequest): Promise<ChatTurn
   if (request.session.pendingAction && isCancel(message)) {
     return respond("All set. I cancelled that pending action.", {
       ...request.session,
-      pendingAction: undefined
+      pendingAction: undefined,
+      planningDeadlinePrompted: undefined
     });
   }
 
@@ -63,7 +64,25 @@ export async function handleChatTurn(request: ChatTurnRequest): Promise<ChatTurn
       const question = analysis.recommended_next_questions[0] ?? "What detail should I add next?";
       return respond(
         `I can help create that project, but I need one more concrete detail before I can prepare the Cerbanimo action preview. ${question}`,
-        { ...request.session, planningDraft: analysis.draft },
+        { ...request.session, planningDraft: analysis.draft, planningDeadlinePrompted: undefined },
+        intent,
+        [questSummaryCard(analysis.draft)]
+      );
+    }
+
+    if (!analysis.draft.timeline && !request.session.planningDeadlinePrompted) {
+      return respond(
+        "I have the required Cerbanimo fields. Do you want to set a deadline before I create it? You can say a date like \"next month\" or \"by August 15\", or say \"no deadline\".",
+        { ...request.session, planningDraft: analysis.draft, planningDeadlinePrompted: true },
+        intent,
+        [questSummaryCard(analysis.draft)]
+      );
+    }
+
+    if (!analysis.draft.timeline && request.session.planningDeadlinePrompted && isDeadlineAffirmation(message)) {
+      return respond(
+        "What deadline should I use? You can say something like \"tomorrow\", \"next month\", or \"by August 15\".",
+        { ...request.session, planningDraft: analysis.draft, planningDeadlinePrompted: true },
         intent,
         [questSummaryCard(analysis.draft)]
       );
@@ -72,7 +91,7 @@ export async function handleChatTurn(request: ChatTurnRequest): Promise<ChatTurn
     const action = previewProjectCreation(analysis.draft);
     return respond(
       "I have enough to create this quest. Please confirm before I write it to Cerbanimo.",
-      { ...request.session, planningDraft: analysis.draft, pendingAction: action },
+      { ...request.session, planningDraft: analysis.draft, planningDeadlinePrompted: undefined, pendingAction: action },
       intent,
       [questSummaryCard(analysis.draft), actionPreviewCard(action)]
     );
@@ -236,6 +255,7 @@ async function executePendingAction(request: ChatTurnRequest): Promise<ChatTurnR
     {
       ...request.session,
       pendingAction: undefined,
+      planningDeadlinePrompted: undefined,
       planningDraft: action.kind === "create_project" ? undefined : request.session.planningDraft,
       actionHistory
     },
@@ -269,6 +289,10 @@ function isConfirmation(message: string): boolean {
 
 function isCancel(message: string): boolean {
   return /^(cancel|stop|nevermind|never mind)$/i.test(message.trim());
+}
+
+function isDeadlineAffirmation(message: string): boolean {
+  return /^(yes|y|sure|please|add one|set one|deadline|with deadline)$/i.test(message.trim());
 }
 
 function isAutomationListRequest(message: string): boolean {

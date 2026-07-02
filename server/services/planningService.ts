@@ -6,9 +6,10 @@ import { buildPlanningPrompt } from "../ai/prompts";
 const requiredFields: Array<keyof PlanningDraft> = ["title", "mission", "desiredOutcome"];
 
 export async function analyzePlanning(message: string, currentDraft?: PlanningDraft): Promise<PlanningAnalysis> {
-  const localAnalysis = analyzePlanningLocally(message, currentDraft);
+  const serverNow = new Date();
+  const localAnalysis = analyzePlanningLocally(message, currentDraft, serverNow);
   const aiAnalysis = await generateGeminiJson<PlanningAnalysis>({
-    prompt: buildPlanningPrompt(message, currentDraft),
+    prompt: buildPlanningPrompt(message, currentDraft, serverNow),
     responseSchema: planningResponseSchema
   }).catch(() => null);
 
@@ -24,7 +25,7 @@ export async function analyzePlanning(message: string, currentDraft?: PlanningDr
   });
 }
 
-function analyzePlanningLocally(message: string, currentDraft?: PlanningDraft): PlanningAnalysis {
+function analyzePlanningLocally(message: string, currentDraft?: PlanningDraft, serverNow = new Date()): PlanningAnalysis {
   const draft: PlanningDraft = { ...(currentDraft ?? {}) };
   const clean = message.replace(/^\/(plan|create)\s*/i, "").trim();
   const explicitTitle = extractTitle(clean);
@@ -37,7 +38,7 @@ function analyzePlanningLocally(message: string, currentDraft?: PlanningDraft): 
   if (!explicitDescription && explicitMission) draft.mission = explicitMission;
   if (!draft.mission && clean) draft.mission = clean;
   if (!draft.desiredOutcome) draft.desiredOutcome = extractOutcome(clean);
-  if (!draft.timeline) draft.timeline = extractTimeline(clean);
+  if (!draft.timeline) draft.timeline = extractTimeline(clean, serverNow);
   if (!draft.audience) draft.audience = extractAudience(clean);
   if (!draft.successCriteria) draft.successCriteria = extractSuccessCriteria(clean, draft.desiredOutcome);
   if (!draft.desiredOutcome && draft.successCriteria) draft.desiredOutcome = draft.successCriteria;
@@ -131,9 +132,85 @@ function extractOutcome(message: string): string | undefined {
   return outcomeMatch?.[1]?.trim();
 }
 
-function extractTimeline(message: string): string | undefined {
-  const timelineMatch = message.match(/\b(today|tomorrow|this week|next week|this month|next month|this quarter|next quarter|this year|next year|by\s+[^,.]+)\b/i);
-  return timelineMatch?.[1]?.trim();
+function extractTimeline(message: string, serverNow: Date): string | undefined {
+  const timelineMatch = message.match(/\b(today|tomorrow|this week|next week|this month|next month|this quarter|next quarter|this year|next year|by\s+[^,.]+|\d{4}-\d{2}-\d{2})\b/i);
+  return timelineMatch?.[1] ? resolveTimeline(timelineMatch[1].trim(), serverNow) : undefined;
+}
+
+function resolveTimeline(value: string, serverNow: Date): string | undefined {
+  const lower = value.toLowerCase();
+  if (/^\d{4}-\d{2}-\d{2}$/.test(lower)) return lower;
+
+  const start = startOfLocalDay(serverNow);
+  if (lower === "today") return formatDate(start);
+  if (lower === "tomorrow") return formatDate(addDays(start, 1));
+  if (lower === "this week") return formatDate(endOfWeek(start, 0));
+  if (lower === "next week") return formatDate(endOfWeek(start, 1));
+  if (lower === "this month") return formatDate(endOfMonth(start, 0));
+  if (lower === "next month") return formatDate(endOfMonth(start, 1));
+  if (lower === "this quarter") return formatDate(endOfQuarter(start, 0));
+  if (lower === "next quarter") return formatDate(endOfQuarter(start, 1));
+  if (lower === "this year") return `${start.getFullYear()}-12-31`;
+  if (lower === "next year") return `${start.getFullYear() + 1}-12-31`;
+
+  const byMatch = lower.match(/^by\s+(.+)$/);
+  if (!byMatch?.[1]) return value;
+
+  const parsed = parseDateLike(byMatch[1], start);
+  return parsed ? formatDate(parsed) : value;
+}
+
+function parseDateLike(value: string, serverNow: Date): Date | undefined {
+  const isoMatch = value.match(/^(\d{4})-(\d{2})-(\d{2})$/);
+  if (isoMatch) return new Date(Number(isoMatch[1]), Number(isoMatch[2]) - 1, Number(isoMatch[3]));
+
+  const monthMatch = value.match(/^(jan(?:uary)?|feb(?:ruary)?|mar(?:ch)?|apr(?:il)?|may|jun(?:e)?|jul(?:y)?|aug(?:ust)?|sep(?:tember)?|oct(?:ober)?|nov(?:ember)?|dec(?:ember)?)\s+(\d{1,2})(?:,\s*(\d{4}))?$/i);
+  if (!monthMatch) return undefined;
+
+  const month = monthIndex(monthMatch[1]);
+  const day = Number(monthMatch[2]);
+  const year = monthMatch[3] ? Number(monthMatch[3]) : inferYear(month, day, serverNow);
+  return new Date(year, month, day);
+}
+
+function monthIndex(value: string): number {
+  const normalized = value.slice(0, 3).toLowerCase();
+  return ["jan", "feb", "mar", "apr", "may", "jun", "jul", "aug", "sep", "oct", "nov", "dec"].indexOf(normalized);
+}
+
+function inferYear(month: number, day: number, serverNow: Date): number {
+  const candidate = new Date(serverNow.getFullYear(), month, day);
+  return candidate < serverNow ? serverNow.getFullYear() + 1 : serverNow.getFullYear();
+}
+
+function startOfLocalDay(value: Date): Date {
+  return new Date(value.getFullYear(), value.getMonth(), value.getDate());
+}
+
+function addDays(value: Date, days: number): Date {
+  return new Date(value.getFullYear(), value.getMonth(), value.getDate() + days);
+}
+
+function endOfWeek(value: Date, weeksFromNow: number): Date {
+  const day = value.getDay();
+  const daysUntilSunday = 6 - day + weeksFromNow * 7;
+  return addDays(value, daysUntilSunday);
+}
+
+function endOfMonth(value: Date, monthsFromNow: number): Date {
+  return new Date(value.getFullYear(), value.getMonth() + monthsFromNow + 1, 0);
+}
+
+function endOfQuarter(value: Date, quartersFromNow: number): Date {
+  const quarterStartMonth = Math.floor(value.getMonth() / 3) * 3;
+  return new Date(value.getFullYear(), quarterStartMonth + (quartersFromNow + 1) * 3, 0);
+}
+
+function formatDate(value: Date): string {
+  const year = value.getFullYear();
+  const month = String(value.getMonth() + 1).padStart(2, "0");
+  const day = String(value.getDate()).padStart(2, "0");
+  return `${year}-${month}-${day}`;
 }
 
 function extractAudience(message: string): string | undefined {

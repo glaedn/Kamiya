@@ -30,8 +30,11 @@ ${message}
 Return the exact JSON shape requested by the schema.`;
 }
 
-export function buildPlanningPrompt(message: string, draft: PlanningDraft | undefined): string {
+export function buildPlanningPrompt(message: string, draft: PlanningDraft | undefined, serverNow: Date): string {
   return `Analyze this quest/project idea and update the planning draft.
+
+Server date/time:
+${serverNow.toISOString()}
 
 Required project fields:
 - title: Cerbanimo project name
@@ -43,6 +46,8 @@ Optional but useful:
 - timeline
 - successCriteria
 - constraints
+
+If the user gives a relative deadline such as "tomorrow", "next week", or "next month", convert it into a strict ISO date string in draft.timeline using the server date/time above.
 
 Current draft:
 ${JSON.stringify(draft ?? {})}

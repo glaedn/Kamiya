@@ -175,6 +175,7 @@ export interface ActionExecutionRecord {
 export interface KamiyaSessionState {
   pendingAction?: ActionPreview;
   planningDraft?: PlanningDraft;
+  planningDeadlinePrompted?: boolean;
   actionHistory?: ActionExecutionRecord[];
   mode?: AgentMode;
 }
