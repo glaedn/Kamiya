@@ -19,6 +19,38 @@ export function actionPreviewCard(action: ActionPreview): ResponseCard {
   };
 }
 
+export function retryProjectActionCard(action: ActionPreview): ResponseCard {
+  return {
+    id: `retry-${action.id}`,
+    kind: "action_preview",
+    title: "Retry project task generation",
+    subtitle: "Cerbanimo did not return active tasks in time",
+    body: action.summary,
+    metadata: {
+      project: String(action.payload.name ?? "Untitled quest"),
+      createdAt: action.createdAt
+    },
+    actions: [
+      { id: "confirm", label: "Retry", style: "primary", actionId: action.id },
+      { id: "cancel", label: "Cancel", style: "secondary", command: "cancel" }
+    ]
+  };
+}
+
+export function projectProcessingCard(data: Record<string, unknown>): ResponseCard {
+  return {
+    id: crypto.randomUUID(),
+    kind: "timeline",
+    title: "Project processing",
+    subtitle: String(data.status ?? "waiting"),
+    body: String(data.message ?? "Kamiya is waiting for Cerbanimo to generate and activate tasks."),
+    metadata: {
+      projectId: String(data.projectId ?? ""),
+      elapsedMs: String(data.elapsedMs ?? 0)
+    }
+  };
+}
+
 export function questSummaryCard(draft: PlanningDraft): ResponseCard {
   const metadata = compactMetadata({
     desiredOutcome: draft.desiredOutcome ?? "",

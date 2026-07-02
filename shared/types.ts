@@ -180,6 +180,7 @@ export interface KamiyaSessionState {
   planningDeadlinePrompted?: boolean;
   actionHistory?: ActionExecutionRecord[];
   mode?: AgentMode;
+  lastProjectAction?: ActionPreview;
 }
 
 export interface PlanningDraft {

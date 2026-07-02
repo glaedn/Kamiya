@@ -47,6 +47,11 @@ export class CerbanimoClient {
       };
     }
 
+    const existingProjectId = action.payload.projectId;
+    if (existingProjectId) {
+      return this.generateAndWaitForProjectTasks({ id: existingProjectId, name: action.payload.name });
+    }
+
     const createPayload = {
       name: limitString(action.payload.name, 100, "Untitled quest"),
       description: limitString(action.payload.description, 5000, "Created through Kamiya."),
@@ -70,9 +75,14 @@ export class CerbanimoClient {
     const projectId = project.id;
     if (!projectId) return created;
 
+    return this.generateAndWaitForProjectTasks(project);
+  }
+
+  private async generateAndWaitForProjectTasks(project: Record<string, unknown>): Promise<CerbanimoResult> {
+    const projectId = project.id;
     const generated = await this.request("/projects/auto-generate", "POST", { projectId });
-    const tasks = await this.request(`/tasks/p/${encodeURIComponent(String(projectId))}`, "GET");
-    const taskItems = extractItems(tasks.data);
+    const taskStatus = await this.waitForActiveProjectTasks(projectId);
+    const taskItems = extractItems(taskStatus.data);
     const activeTasks = taskItems.filter((task) => isActiveTask(task.status));
 
     return {
@@ -80,9 +90,20 @@ export class CerbanimoClient {
       data: {
         project,
         autoGenerate: generated.ok ? generated.data : { ok: false, error: generated.error },
-        activeTasks
+        activeTasks,
+        taskStatus: taskStatus.data,
+        taskWaitTimedOut: taskStatus.timedOut,
+        taskGenerationError: generated.ok ? undefined : generated.error
       }
     };
+  }
+
+  async projectTaskStatus(projectId: number | string): Promise<CerbanimoResult> {
+    if (!this.apiUrl || !this.token) {
+      return { ok: false, error: "Cerbanimo API credentials are not configured." };
+    }
+
+    return this.request(`/projects/${encodeURIComponent(String(projectId))}/task-status`, "GET");
   }
 
   async saveChat(input: {
@@ -325,6 +346,26 @@ export class CerbanimoClient {
     return { ok: true, data };
   }
 
+  private async waitForActiveProjectTasks(projectId: unknown): Promise<CerbanimoResult & { timedOut?: boolean }> {
+    const deadline = Date.now() + 30_000;
+    let latest: CerbanimoResult | undefined;
+
+    while (Date.now() <= deadline) {
+      latest = await this.projectTaskStatus(String(projectId));
+      if (!latest.ok) return latest;
+
+      const items = extractItems(latest.data);
+      if (items.some((task) => isActiveTask(task.status))) return latest;
+      await wait(2_500);
+    }
+
+    return {
+      ok: true,
+      data: latest?.data ?? { projectId, tasks: [] },
+      timedOut: true
+    };
+  }
+
   private auth0IdForProject(payload: Record<string, unknown>): string | undefined {
     const explicit = payload.auth0_id ?? payload.auth0Id;
     if (typeof explicit === "string" && explicit.trim()) return explicit;
@@ -335,7 +376,7 @@ export class CerbanimoClient {
 }
 
 function isActiveTask(status: unknown): boolean {
-  return typeof status === "string" && /^(active|urgent|ready|open|available|in_progress)$/i.test(status);
+  return typeof status === "string" && /^(active|urgent|ready|open|available|in_progress)/i.test(status);
 }
 
 function extractItems(data: unknown): Array<Record<string, unknown>> {
@@ -372,4 +413,8 @@ function errorMessageFromResponse(data: unknown, response: Response): string {
 
   if (typeof data === "string" && data.trim()) return data;
   return `${response.status} ${response.statusText}`;
+}
+
+function wait(ms: number): Promise<void> {
+  return new Promise((resolve) => setTimeout(resolve, ms));
 }

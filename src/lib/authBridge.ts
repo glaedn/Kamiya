@@ -83,12 +83,14 @@ export function attachCerbanimoAuth(auth: KamiyaAuthContext): KamiyaAuthContext 
 }
 
 export function getCerbanimoAccessToken(): string | undefined {
-  return getStoredCerbanimoSession()?.accessToken ?? sessionStorage.getItem(accessTokenKey) ?? undefined;
+  return getStoredCerbanimoSession()?.accessToken ?? readStorage(sessionStorage, accessTokenKey) ?? readStorage(localStorage, accessTokenKey) ?? undefined;
 }
 
 export function clearCerbanimoSession(): void {
   sessionStorage.removeItem(authSessionKey);
   sessionStorage.removeItem(accessTokenKey);
+  localStorage.removeItem(authSessionKey);
+  localStorage.removeItem(accessTokenKey);
 }
 
 export function startCerbanimoLogin(): Promise<LoginResult> {
@@ -142,8 +144,7 @@ export function startCerbanimoLogin(): Promise<LoginResult> {
         audience: event.data.audience,
         user: event.data.user
       };
-      sessionStorage.setItem(authSessionKey, JSON.stringify(session));
-      sessionStorage.setItem(accessTokenKey, event.data.accessToken);
+      writeSession(session);
 
       resolve({
         session,
@@ -160,7 +161,7 @@ export function startCerbanimoLogin(): Promise<LoginResult> {
 }
 
 function getStoredCerbanimoSession(): StoredCerbanimoSession | undefined {
-  const raw = sessionStorage.getItem(authSessionKey);
+  const raw = readStorage(sessionStorage, authSessionKey) ?? readStorage(localStorage, authSessionKey);
   if (!raw) return undefined;
 
   try {
@@ -169,10 +170,27 @@ function getStoredCerbanimoSession(): StoredCerbanimoSession | undefined {
       clearCerbanimoSession();
       return undefined;
     }
+    writeSession(session);
     return session;
   } catch {
     clearCerbanimoSession();
     return undefined;
+  }
+}
+
+function writeSession(session: StoredCerbanimoSession): void {
+  const raw = JSON.stringify(session);
+  sessionStorage.setItem(authSessionKey, raw);
+  localStorage.setItem(authSessionKey, raw);
+  sessionStorage.setItem(accessTokenKey, session.accessToken);
+  localStorage.setItem(accessTokenKey, session.accessToken);
+}
+
+function readStorage(storage: Storage, key: string): string | null {
+  try {
+    return storage.getItem(key);
+  } catch {
+    return null;
   }
 }
 

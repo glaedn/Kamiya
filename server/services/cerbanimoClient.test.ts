@@ -20,7 +20,7 @@ describe("CerbanimoClient", () => {
       })
       .mockResolvedValueOnce({
         ok: true,
-        json: async () => []
+        json: async () => ({ tasks: [{ id: 1, name: "Prep beds", status: "active-unassigned" }] })
       });
     vi.stubGlobal("fetch", fetchMock);
 
@@ -81,7 +81,7 @@ describe("CerbanimoClient", () => {
         ok: true,
         json: async () => ({
           tasks: [
-            { id: 1, name: "Reserve a table", status: "active" },
+            { id: 1, name: "Reserve a table", status: "active-unassigned" },
             { id: 2, name: "Publish recap", status: "blocked" }
           ]
         })

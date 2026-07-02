@@ -8,8 +8,10 @@ import {
   helpCard,
   navigationCard,
   notificationCard,
+  projectProcessingCard,
   profileCard,
   questSummaryCard,
+  retryProjectActionCard,
   searchResultsCard,
   statsCard,
   taskListCard,
@@ -270,11 +272,12 @@ async function executePendingAction(request: ChatTurnRequest): Promise<ChatTurnR
     });
   }
 
+  const taskWaitTimedOut = Boolean((result.data as { taskWaitTimedOut?: unknown } | undefined)?.taskWaitTimedOut);
   const record = {
     id: crypto.randomUUID(),
     previewId: action.id,
     kind: action.kind,
-    status: action.kind === "run_automation" ? ("queued" as const) : ("completed" as const),
+    status: taskWaitTimedOut ? ("failed" as const) : action.kind === "run_automation" ? ("queued" as const) : ("completed" as const),
     title: action.title,
     summary: action.summary,
     createdAt: new Date().toISOString(),
@@ -286,6 +289,37 @@ async function executePendingAction(request: ChatTurnRequest): Promise<ChatTurnR
 
   const activeTasks = activeTasksFromResult(result.data);
   const createdProject = projectFromResult(result.data);
+  if (action.kind === "create_project" && taskWaitTimedOut) {
+    const retryAction = {
+      ...action,
+      payload: {
+        ...action.payload,
+        projectId: createdProject?.id ?? action.payload.projectId
+      }
+    };
+    return respond(
+      "something went wrong. Retry?",
+      {
+        ...request.session,
+        pendingAction: retryAction,
+        lastProjectAction: retryAction,
+        planningDeadlinePrompted: undefined,
+        actionHistory
+      },
+      undefined,
+      [
+        projectProcessingCard({
+          projectId: retryAction.payload.projectId ?? "",
+          status: "timeout",
+          message: "Cerbanimo created the project, but no active tasks appeared within 30 seconds.",
+          elapsedMs: 30000
+        }),
+        retryProjectActionCard(retryAction),
+        actionQueueCard(actionHistory, result.mocked)
+      ]
+    );
+  }
+
   return respond(
     action.kind === "create_project"
       ? formatProjectCreatedMessage(createdProject, activeTasks)
@@ -297,6 +331,7 @@ async function executePendingAction(request: ChatTurnRequest): Promise<ChatTurnR
       pendingAction: undefined,
       planningDeadlinePrompted: undefined,
       planningDraft: action.kind === "create_project" ? undefined : request.session.planningDraft,
+      lastProjectAction: action.kind === "create_project" ? action : request.session.lastProjectAction,
       actionHistory
     },
     undefined,
