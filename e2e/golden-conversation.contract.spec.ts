@@ -65,7 +65,7 @@ test.describe("golden conversation contract", () => {
       await page.reload();
       await expect(page.getByText("What is your quest?")).toBeVisible();
       await expect(page.getByRole("heading", { name: "Quest creation progress" })).toBeVisible();
-      await expect(page.getByText("Committing the project")).toBeVisible();
+      await expect(page.getByText("Committing the project").first()).toBeVisible();
       await page.screenshot({ path: path.join(screenshotDir, "04-recovered-after-refresh.png") });
 
       const state = await fixtureState(request);

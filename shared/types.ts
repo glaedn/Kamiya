@@ -292,6 +292,9 @@ export interface KamiyaSessionState {
   mode?: AgentMode;
   lastProjectAction?: ActionPreview;
   activeAction?: ActiveCerbanimoActionState;
+  e2eScenario?: string;
+  e2eRunId?: string;
+  e2eControlDir?: string;
 }
 
 export interface PlanningDraft {

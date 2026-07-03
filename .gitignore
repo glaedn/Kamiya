@@ -14,7 +14,9 @@ coverage/
 *.log
 qa-*.png
 playwright-report/
+playwright-report-real-stack/
 test-results/
+test-results-real-stack/
 artifacts/golden-conversation/
 
 # OS/editor noise.

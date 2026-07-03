@@ -15,7 +15,7 @@ const democraticEconomyFixture = {
 };
 
 export async function analyzePlanning(message: string, currentDraft?: PlanningDraft): Promise<PlanningAnalysis> {
-  const serverNow = new Date();
+  const serverNow = serverNowForPlanning();
   const localAnalysis = analyzePlanningLocally(message, currentDraft, serverNow);
   const aiAnalysis = await generateGeminiJson<PlanningAnalysis>({
     prompt: buildPlanningPrompt(message, currentDraft, serverNow),
@@ -29,6 +29,15 @@ export async function analyzePlanning(message: string, currentDraft?: PlanningDr
     draft: mergeDrafts(localAnalysis.draft, aiAnalysis.draft),
     fulfilled_fields: [...localAnalysis.fulfilled_fields, ...(aiAnalysis.fulfilled_fields ?? [])]
   });
+}
+
+function serverNowForPlanning(): Date {
+  const configured = process.env.KAMIYA_E2E_NOW || process.env.KAMIYA_SERVER_NOW;
+  if (configured) {
+    const parsed = new Date(configured);
+    if (!Number.isNaN(parsed.getTime())) return parsed;
+  }
+  return new Date();
 }
 
 function analyzePlanningLocally(message: string, currentDraft?: PlanningDraft, serverNow = new Date()): PlanningAnalysis {

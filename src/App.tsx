@@ -26,6 +26,7 @@ export default function App() {
   const authRef = useRef(auth);
   const hydrationMessageIdRef = useRef<string | undefined>();
   const networkNoticeRef = useRef(false);
+  const isSendingRef = useRef(false);
 
   const statusLabel = auth.isLoggedIn ? auth.displayName || "Connected" : "Logged out";
   const quickCommands = useMemo(() => slashCommands.slice(0, 6), []);
@@ -66,7 +67,7 @@ export default function App() {
 
   useEffect(() => {
     const active = sessionRef.current.activeAction;
-    if (!auth.isLoggedIn || !active || !shouldPollStatus(active.status)) return undefined;
+    if (!auth.isLoggedIn || !active || (!shouldPollStatus(active.status) && !isTerminalStatus(active.status))) return undefined;
     const initialActionId = active.actionUuid ?? active.actionId;
 
     let stopped = false;
@@ -133,12 +134,13 @@ export default function App() {
 
   async function submitMessage(value = input) {
     const trimmed = value.trim();
-    if (!trimmed || isSending) return;
+    if (!trimmed || isSendingRef.current) return;
 
     const userMessage = makeUserMessage(trimmed);
     const nextHistory = [...messages, userMessage];
     setMessages(nextHistory);
     setInput("");
+    isSendingRef.current = true;
     setIsSending(true);
 
     try {
@@ -166,6 +168,7 @@ export default function App() {
         }
       ]);
     } finally {
+      isSendingRef.current = false;
       setIsSending(false);
     }
   }
@@ -176,7 +179,7 @@ export default function App() {
   }
 
   function handleCardAction(action: CardAction) {
-    if (isSending) return;
+    if (isSendingRef.current) return;
     if (action.id === "confirm") {
       void submitMessage("confirm");
       return;

@@ -140,6 +140,14 @@ Rendered bootstrap stages:
 - `activateRootTasks`
 - `finalizeAction`
 
+Golden Conversation v1 verification covers this contract through:
+
+- `npm run test:e2e:contract`: deterministic browser contract against a stateful local Cerbanimo fixture.
+- `npm run test:e2e:integration`: real Kamiya React and Express, real Cerbanimo `/api/v1`, isolated PostgreSQL, real pg-boss worker, deterministic provider at the external generation seam.
+- `npm run test:e2e:failure`: timeout retry, invalid graph block, cancel-before-persist, network interruption, duplicate confirmation, missing auth, and cross-user hydration denial.
+
+The real-stack profile asserts that the golden project path does not call `/platform`, `/projects/create`, or `/projects/auto-generate`.
+
 ## Phase 3 Automation Contract
 
 Automation previews include:

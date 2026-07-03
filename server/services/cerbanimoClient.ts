@@ -84,23 +84,25 @@ export class CerbanimoClient {
     activeAction: ActiveCerbanimoActionState;
   }>> {
     if (!this.hasUserToken()) return this.missingUserAuthResult("prepare a Cerbanimo project preview");
+    const bootstrapArguments = {
+      name: action.payload.name,
+      description: action.payload.description,
+      outcomeStatement: action.payload.outcomeStatement,
+      dueDate: action.payload.dueDate ?? action.payload.due_date ?? null,
+      tags: action.payload.tags ?? [],
+      generationMode: action.payload.generationMode ?? "plan_then_tasks",
+      autoAssign: action.payload.auto_assign ?? false,
+      location: action.payload.location ?? null,
+      isService: action.payload.is_service ?? false,
+      serviceVisibility: action.payload.service_visibility ?? ["private"],
+      servicePrice: action.payload.service_price ?? 0,
+      ...e2eBootstrapArguments(action.payload)
+    };
 
     const result = await this.previewAction({
       intent: {
         functionName: "projects.bootstrap",
-        arguments: {
-          name: action.payload.name,
-          description: action.payload.description,
-          outcomeStatement: action.payload.outcomeStatement,
-          dueDate: action.payload.dueDate ?? action.payload.due_date ?? null,
-          tags: action.payload.tags ?? [],
-          generationMode: action.payload.generationMode ?? "plan_then_tasks",
-          autoAssign: action.payload.auto_assign ?? false,
-          location: action.payload.location ?? null,
-          isService: action.payload.is_service ?? false,
-          serviceVisibility: action.payload.service_visibility ?? ["private"],
-          servicePrice: action.payload.service_price ?? 0
-        }
+        arguments: bootstrapArguments
       },
       previewPayload: {
         title: action.title,
@@ -581,4 +583,13 @@ function normalizeActionStatus(status: unknown): ActiveCerbanimoActionState["sta
     return value;
   }
   return "confirmed";
+}
+
+function e2eBootstrapArguments(payload: Record<string, unknown>): Record<string, unknown> {
+  if (process.env.KAMIYA_REAL_STACK_E2E !== "1") return {};
+  return {
+    e2eScenario: payload._e2eScenario,
+    e2eRunId: payload._e2eRunId,
+    e2eControlDir: payload._e2eControlDir
+  };
 }

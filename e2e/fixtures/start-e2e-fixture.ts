@@ -137,6 +137,7 @@ process.env.KAMIYA_CERBANIMO_API_URL = `http://127.0.0.1:${fixturePort}`;
 process.env.KAMIYA_ALLOWED_ORIGIN = `http://127.0.0.1:${kamiyaPort}`;
 process.env.KAMIYA_GEMINI_API_KEY = "";
 process.env.KAMIYA_CERBANIMO_TIMEOUT_MS = "5000";
+process.env.KAMIYA_E2E_NOW = "2026-07-02T12:00:00.000-04:00";
 
 await import("../../server/index");
 

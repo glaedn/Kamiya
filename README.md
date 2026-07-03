@@ -16,7 +16,7 @@ Cerbanimo stores projects, tasks, communities, rewards, memory, statistics, and 
 
 ## Golden Conversation v1
 
-Kamiya's project-creation golden path now uses Cerbanimo's durable `/api/v1/actions` contract:
+Kamiya's project-creation golden path uses Cerbanimo's durable `/api/v1/actions` contract:
 
 ```text
 POST /api/v1/actions/preview
@@ -28,6 +28,11 @@ GET  /api/v1/actions
 ```
 
 The canonical function is `projects.bootstrap`. Kamiya owns the conversation, preview rendering, explicit confirmation, progress polling, refresh recovery, and result cards. Cerbanimo owns the persisted action, workflow, project plan generation, task graph validation, project/task persistence, activation, retries, and audit history.
+
+Golden Conversation v1 now passes both profiles:
+
+- Deterministic contract profile: local stateful Cerbanimo fixture, desktop/mobile browser checks, no production services.
+- Isolated real-stack profile: real Kamiya React app, real Kamiya Express API, real Cerbanimo `/api/v1`, isolated PostgreSQL database, real pg-boss worker, deterministic provider at the external generation seam only.
 
 The older direct project creation plus `/projects/auto-generate` sequence is deprecated for Kamiya's golden project flow.
 
@@ -76,9 +81,18 @@ See `docs/cerbanimo-platform-requirements.md` for the Cerbanimo APIs and core pl
 
 ```bash
 npm run test:e2e:contract
-npm run test:e2e:headed -- --grep "golden conversation"
+npm run test:e2e:integration
+npm run test:e2e:failure
+npm run test:e2e
+npm run test:e2e:headed
 ```
 
-The contract suite starts a local stateful Cerbanimo fixture and never contacts production hosts. In PowerShell, if npm drops the `--grep` option, use `npm run test:e2e:headed -- "--grep=golden conversation"` or `npx playwright test --headed --project=chromium --grep="golden conversation"`.
+The contract suite starts a local stateful Cerbanimo fixture and never contacts production hosts. The real-stack suites start a Windows-compatible local process group through `e2e/real-stack/start-real-stack.ts`.
 
-Real-stack integration is gated behind `KAMIYA_REAL_STACK_E2E=1` and requires an isolated Cerbanimo database/schema containing `e2e` or `test` plus a deterministic project-bootstrap provider.
+Real-stack safety rules:
+
+- The launcher creates a unique PostgreSQL database whose name contains `e2e`.
+- Database drop/create refuses targets without `e2e` or `test`, and refuses production-like names.
+- Cerbanimo deterministic bootstrap mode refuses startup unless `NODE_ENV=test`, `CERBANIMO_E2E_MODE=true`, and the database target contains `e2e` or `test`.
+- The launcher clears live Gemini keys for the test process and uses scoped E2E API tokens only.
+- Real-stack artifacts are written under `artifacts/golden-conversation/`, `playwright-report-real-stack/`, and `test-results-real-stack/`; those paths are gitignored.

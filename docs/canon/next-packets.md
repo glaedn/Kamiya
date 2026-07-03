@@ -1,26 +1,30 @@
 # Recommended Next Packets
 
-Evidence basis: Kamiya@69adfd2; Cerbanimo@render-deploy ce5eca1. The order keeps the packet owner's requested first items, with one dependency-aware adjustment: API v1 foundation remains immediately after project-generation repair because most later work depends on stable envelopes, request IDs, scopes, and OpenAPI.
+Evidence basis: Kamiya branch `kamiya/m2-golden-conversation-v1`; Cerbanimo branch `kamiya/m1-durable-project-bootstrap`. Golden Conversation v1 real-stack acceptance is now complete, so the next packet should move forward into task automation classification instead of more bootstrap proof.
 
-## Packet 002: Repair And Instrument Project Creation To Task Generation
+## Completed Baseline: Packet 002 Project Creation Bootstrap
 
-Goal: Make the golden path from Kamiya project confirmation to Cerbanimo active tasks reliable, observable, and test-covered.
+Status: complete for Golden Conversation v1 through the durable `projects.bootstrap` action path.
+
+Original goal: Make the golden path from Kamiya project confirmation to Cerbanimo active tasks reliable, observable, and test-covered.
 
 User-visible outcome: Cami creates a project and sees active tasks or a clear, retryable, non-duplicating error with traceable logs.
 
 Repository scope: Cerbanimo `backend/routes/projects.js`, `backend/services/taskGenerator.js`, `backend/services/TaskRoutingService.js`, route tests; Kamiya `server/services/cerbanimoClient.ts` only if contract changes are needed.
 
-Dependencies: Current `/projects/create`, `/projects/auto-generate`, `/projects/:id/task-status`.
+Dependencies: Cerbanimo `/api/v1/actions` and the `projects.bootstrap` worker path.
 
 Primary risk: LLM-generated task graph can be malformed while still passing superficial JSON parsing.
 
 Estimated size: M
 
-Proof of completion: Integration tests cover project insert, generation success, no-task failure, malformed dependencies, idempotent retry, active task polling, and logged request IDs.
+Proof of completion: Real-stack tests cover project insert, generation success, invalid graph blocking, idempotent retry, active task hydration, and logged request IDs.
 
-## Packet 003: API v1 Foundation, Response Envelopes, Request IDs, And OpenAPI Scaffold
+## Completed Baseline: Packet 003 API v1 Golden Path
 
-Goal: Choose and harden the canonical client API surface for Kamiya and future clients.
+Status: complete for the project-creation golden path.
+
+Original goal: Choose and harden the canonical client API surface for Kamiya and future clients.
 
 User-visible outcome: Kamiya receives predictable errors and can show actionable blockers instead of `[object Object]` or generic failures.
 
@@ -32,39 +36,23 @@ Primary risk: Legacy route compatibility.
 
 Estimated size: L
 
-Proof of completion: OpenAPI includes golden-path projects/tasks/actions/chats; request IDs appear in logs and responses; Kamiya parses normalized envelopes.
+Proof of completion: Kamiya calls `/api/v1/actions/preview`, `/confirm`, and action hydration for `projects.bootstrap`; request IDs appear in responses; legacy `/platform`, `/projects/create`, and `/projects/auto-generate` calls are blocked by browser tests for the golden path.
 
-## Packet 004: Auth0 Popup Bridge And Permission Introspection
+## Packet 004: Task Automation Classification
 
-Goal: Formalize the login/token/permission contract between Kamiya and Cerbanimo.
+Goal: Classify active tasks as human-driven, assisted automation, or fully automatable using authoritative Cerbanimo task metadata and capability policy.
 
-User-visible outcome: Login popup closes reliably, Kamiya shows logged-in state after refresh, and unavailable actions explain missing permission.
+User-visible outcome: After Kamiya creates a project, active task cards clearly show whether Cami should do the task, supply inputs for Kamiya to help, or allow Kamiya to queue an automation after confirmation.
 
-Repository scope: Cerbanimo `src/pages/AuthBridge.jsx`, `backend/services/apiAuthService.js`, `/auth/permissions` or `/api/v1/auth/permissions`; Kamiya [src/lib/authBridge.ts](../../src/lib/authBridge.ts), auth settings UI.
+Repository scope: Cerbanimo task schema/metadata, task generation prompt validation, capability registry, `/api/v1/tasks` or action detail payloads; Kamiya task cards and Golden Conversation continuation tests.
 
-Dependencies: API foundation or a stable interim permission endpoint.
+Dependencies: Golden Conversation v1 bootstrap contract and task graph persistence.
 
-Primary risk: Auth0 dashboard settings are outside repo.
+Primary risk: Classification becomes AI-only and non-auditable instead of platform-owned metadata.
 
 Estimated size: M
 
-Proof of completion: Local and Render auth bridge checklist, callback tests where possible, permission introspection shown in Kamiya settings.
-
-## Packet 004A: Real-Stack Golden Conversation Enablement And Task Automation Classification
-
-Goal: Turn the Packet 003 deterministic browser contract into a real-stack browser test against Cerbanimo PR #145 or reviewed descendant, then add authoritative task automation classification.
-
-User-visible outcome: Cami can create a project through Kamiya against real local Cerbanimo and see which active tasks are human-driven, assisted, or automatable without fake controls.
-
-Repository scope: Cerbanimo deterministic bootstrap provider/test DB guard/database verifier; Kamiya `e2e/golden-conversation.integration.spec.ts`, task cards, docs.
-
-Dependencies: Cerbanimo isolated e2e database/schema, deterministic `projects.bootstrap` generator mode, scoped e2e actor/token.
-
-Primary risk: Accidentally running cleanup or mutation against development/production data.
-
-Estimated size: L
-
-Proof of completion: `KAMIYA_REAL_STACK_E2E=1 npm run test:e2e:integration` passes, database verifier proves one action/workflow/project/task graph, and task cards show only implemented authoritative actions.
+Proof of completion: Generated and manual tasks expose classification plus required human-input metadata; Kamiya renders distinct actions without fake controls; the golden conversation continues from project creation into the first active-task choice.
 
 ## Packet 005: Persistent Action Queue And Audit Log
 
@@ -98,21 +86,21 @@ Estimated size: M
 
 Proof of completion: Worker is idempotent, logs steps, supports project target and one repository target mode, and returns renderable result cards.
 
-## Packet 007: Task Automation-Classification Contract And UI Behavior
+## Packet 007: Auth0 Permission Introspection And Settings
 
-Goal: Classify tasks as human-driven, automatable with human input, or fully automatable.
+Goal: Formalize the permission contract between Kamiya and Cerbanimo beyond the working popup bridge.
 
-User-visible outcome: Active tasks display the correct interaction pattern in Kamiya.
+User-visible outcome: Kamiya explains unavailable actions by permission and shows connection health in settings.
 
-Repository scope: Cerbanimo task schema/metadata, capability registry, task generation prompt validation; Kamiya task cards.
+Repository scope: Cerbanimo `/api/v1/auth/permissions` or equivalent; Kamiya auth settings UI.
 
-Dependencies: Task-generation reliability and API foundation.
+Dependencies: API foundation.
 
-Primary risk: Classification logic could become AI-only and non-auditable.
+Primary risk: Auth0 dashboard settings remain outside repo and can drift.
 
 Estimated size: M
 
-Proof of completion: Generated and manual tasks expose classification plus required human-input metadata; Kamiya renders distinct actions.
+Proof of completion: Permission introspection is shown in Kamiya settings and tested locally.
 
 ## Packet 008: Submission-Validation Pipeline Foundation
 

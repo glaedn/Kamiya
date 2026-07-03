@@ -1,6 +1,6 @@
 # Current Architecture
 
-Evidence basis: Kamiya@69adfd2 on branch `kamiya/m0-project-canon-architecture`; Cerbanimo@render-deploy ce5eca1. This file describes current repository behavior, not intended future behavior unless labeled as such.
+Evidence basis: Kamiya branch `kamiya/m2-golden-conversation-v1`; Cerbanimo branch `kamiya/m1-durable-project-bootstrap`. This file describes current repository behavior, not intended future behavior unless labeled as such.
 
 ## 1. System Context
 
@@ -79,30 +79,31 @@ Owner: Kamiya conversation layer. Entrypoints: [src/App.tsx](../../src/App.tsx) 
 ```mermaid
 sequenceDiagram
   participant U as User
-  participant K as Kamiya
-  participant P as Cerbanimo projects route
-  participant TG as taskGenerator
-  participant TR as TaskRoutingService
+  participant K as Kamiya API
+  participant A as Cerbanimo api_actions
+  participant W as project-bootstrap worker
   participant DB as PostgreSQL
   U->>K: Describe goal
   K->>K: planning draft and preview
+  K->>A: POST /api/v1/actions/preview projects.bootstrap
+  A->>DB: persist preview action
+  A-->>K: previewed action
   U->>K: confirm
-  K->>P: POST /projects/create
-  P->>DB: insert project
-  P->>DB: create outcome
-  P-->>K: project row
-  K->>P: POST /projects/auto-generate
-  P->>TG: autogeneratePlan() or autoGenerateTasks()
-  TG-->>P: generated tasks
-  P->>DB: insert tasks and dependencies
-  P->>TR: activateProjectTasks()
-  TR->>DB: activate unblocked tasks
-  K->>P: GET /projects/:id/task-status until active or timeout
+  K->>A: POST /api/v1/actions/:id/confirm
+  A->>DB: status confirmed + workflow run
+  A->>W: queue project-bootstrap
+  K->>A: GET /api/v1/actions/:id
+  W->>W: validate input and generate plan/tasks
+  W->>W: validate task graph
+  W->>DB: persist project, outcome, tasks atomically
+  W->>DB: activate root tasks
+  W->>A: mark executed/completed
+  K->>A: hydrate terminal detail
 ```
 
-Current implementation: Kamiya@69adfd2: [server/services/cerbanimoClient.ts](../../server/services/cerbanimoClient.ts) :: `createProject()`, `generateAndWaitForProjectTasks()`, `waitForActiveProjectTasks()`. Cerbanimo@render-deploy ce5eca1: `backend/routes/projects.js` :: `router.post('/create')`, `router.post('/auto-generate')`, `router.get('/:projectId/task-status')`; `backend/services/taskGenerator.js` :: `autogeneratePlan()`, `autoGenerateTasks()`; `backend/services/TaskRoutingService.js` :: `activateProjectTasks()`.
+Current implementation: [server/services/cerbanimoClient.ts](../../server/services/cerbanimoClient.ts) :: `previewProjectBootstrap()`, `confirmAction()`, `hydrateProjectBootstrapAction()`; [server/services/chatService.ts](../../server/services/chatService.ts) :: `executePendingAction()`, `hydrateActionResponse()`; Cerbanimo `backend/routes/api_v1/index.js`, `backend/services/ProjectBootstrapService.js`, `backend/jobs/workers/projectBootstrapWorker.js`.
 
-Observed breakpoints: project creation and auto-generation are separate HTTP requests. If task generation fails or returns no active tasks, Kamiya waits up to 30 seconds and shows a retry. Cerbanimo retries reuse an existing task graph when present. The project route sanitizes generated task names, but the LLM prompt remains able to produce malformed dependency graphs or missing fields.
+Observed behavior: project creation is previewed and confirmed as a durable Cerbanimo action. Retry, cancel, invalid graph, duplicate confirm, refresh recovery, and cross-user hydration denial are covered by real-stack browser tests. The legacy `/projects/create` plus `/projects/auto-generate` path remains in Cerbanimo for non-Kamiya surfaces but is deprecated for Kamiya's golden flow.
 
 ## 5. Task Claim, Submission, Review, Approval, Reward, Activation
 
@@ -237,4 +238,15 @@ The old direct project path is deprecated for the golden flow:
 - no `POST /projects/auto-generate`;
 - no `/platform` call.
 
-The deterministic browser contract uses a local stateful Cerbanimo fixture so production Auth0, production databases, Render URLs, and live Gemini are not touched. The real-stack integration spec is present but skipped until Cerbanimo has an isolated e2e database and deterministic bootstrap provider.
+The deterministic browser contract uses a local stateful Cerbanimo fixture so production Auth0, production databases, Render URLs, and live Gemini are not touched.
+
+The isolated real-stack profile now exercises the same browser journey through a real local process group:
+
+- Kamiya React app served by Vite;
+- Kamiya Express API;
+- Cerbanimo `/api/v1/actions` routes;
+- isolated PostgreSQL database whose generated name contains `e2e`;
+- real pg-boss queue and project-bootstrap worker;
+- deterministic Cerbanimo project-bootstrap provider at the external generation seam only.
+
+Real-stack startup is owned by [e2e/real-stack/start-real-stack.ts](../../e2e/real-stack/start-real-stack.ts). It validates the Cerbanimo dependency SHA, creates and drops only a protected e2e database, clears live Gemini keys from the test processes, seeds scoped E2E actors, and writes local artifacts to gitignored directories. The failure profile covers timeout retry, invalid graph block, cancel-before-persist, network interruption, duplicate confirmation, missing auth, and cross-user hydration denial.

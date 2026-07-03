@@ -14,6 +14,8 @@ export function actionPreviewCard(action: ActionPreview): ResponseCard {
   const projectName = String(action.payload.name ?? action.title.replace(/^Create project:\s*/i, ""));
   const description = String(action.payload.description ?? "");
   const outcome = String(action.payload.outcomeStatement ?? "");
+  const durableActionId = action.cerbanimoActionUuid ?? action.cerbanimoActionId;
+  const actionId = durableActionId ?? action.id;
 
   return {
     id: `card-${action.id}`,
@@ -31,12 +33,12 @@ export function actionPreviewCard(action: ActionPreview): ResponseCard {
       tags,
       permissions: action.requiredPermissions,
       confirmationStatus: "awaiting explicit confirmation",
-      actionId: action.cerbanimoActionUuid ?? action.cerbanimoActionId ?? action.id,
+      actionId,
       createdAt: action.createdAt
     },
     actions: [
       { id: "confirm", label: "Confirm quest creation", style: "primary", actionId: action.cerbanimoActionId ?? action.id },
-      { id: "cancel", label: "Cancel quest creation", style: "secondary", command: "cancel" }
+      { id: "cancel", label: "Cancel quest creation", style: "secondary", command: durableActionId ? `cancel action ${actionId}` : "cancel", actionId }
     ]
   };
 }

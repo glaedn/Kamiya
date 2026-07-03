@@ -4,9 +4,9 @@ This contract keeps Kamiya's long conversation as one product journey instead of
 
 ## Stage 1: Quest Creation Through Active Tasks
 
-Status: implemented for the deterministic browser contract.
+Status: implemented for the deterministic browser contract and isolated real-stack browser acceptance.
 
-Covered by `golden-conversation.contract.spec.ts`:
+Covered by `golden-conversation.contract.spec.ts`, `golden-conversation.integration.spec.ts`, and `golden-conversation.failure.spec.ts`:
 
 - logged-in opening asks "What is your quest?";
 - the golden natural-language quest is classified as planning;
@@ -19,7 +19,9 @@ Covered by `golden-conversation.contract.spec.ts`:
 - terminal success renders the created project and active root tasks;
 - Open Project and Explore Active Tasks controls are present;
 - token-like values stay out of localStorage, DOM text, and URL;
-- axe reports no critical or serious violations in the deterministic run.
+- axe reports no critical or serious violations in deterministic and real-stack checkpoints;
+- the real-stack profile uses real Kamiya React and Express, real Cerbanimo `/api/v1`, isolated PostgreSQL, and real pg-boss workers;
+- failure coverage includes retry-on-timeout, invalid graph block, cancel-before-persist, network interruption, duplicate confirmation, missing auth, and cross-user hydration denial.
 
 ## Stage 2: Active Task Classification
 
@@ -31,7 +33,22 @@ Required platform/API dependencies:
 - an endpoint that classifies tasks as human-driven, assisted automation, or fully automatable;
 - a documented action function for queuing automation against a specific task.
 
-Playwright placeholder: `golden-conversation.failure.spec.ts`.
+Future Packet 004 should add continuation coverage after the project result cards render active tasks.
+
+## Packet 003A Skipped-Test Inventory
+
+| Test | Previous skip reason | Required dependency | Resolution |
+| --- | --- | --- | --- |
+| Real-stack golden conversation | No isolated Cerbanimo e2e stack. | Local Postgres, Cerbanimo `/api/v1`, pg-boss worker, deterministic provider seam. | Implemented in `golden-conversation.integration.spec.ts`; no v1 skip remains. |
+| Retry once then success | Retry behavior needed real worker and provider control. | `timeout_once_then_success` deterministic scenario plus DB verifier. | Implemented in `golden-conversation.failure.spec.ts`. |
+| Invalid graph blocked | Needed real graph validation before persistence. | `invalid_cycle` deterministic scenario and blocked workflow state. | Implemented in `golden-conversation.failure.spec.ts`. |
+| Cancel before persistence | Needed a controllable pre-persist barrier. | `hold_before_persist` deterministic scenario and cancel endpoint. | Implemented in `golden-conversation.failure.spec.ts`. |
+| Network interruption | Needed browser polling against real hydration endpoint. | Playwright route abort and recovery against Kamiya `/api/actions/hydrate`. | Implemented in `golden-conversation.failure.spec.ts`. |
+| Double confirmation | Needed durable confirm idempotency proof. | Real `/api/v1/actions/:id/confirm` plus request log and DB verifier. | Implemented in `golden-conversation.failure.spec.ts`. |
+| Authentication failure | Needed no-mock logged-out/expired browser state. | Missing/expired E2E session and DB no-action verifier. | Implemented in `golden-conversation.failure.spec.ts`. |
+| Refresh recovery | Needed stable action IDs and session hydration. | Real-stack integration refresh during held running stage. | Implemented in `golden-conversation.integration.spec.ts`. |
+
+Future-stage placeholders for automation execution, proof validation, rewards, dependency completion, and follow-on quests remain outside Golden Conversation v1.
 
 ## Stage 3: Automated Task Execution
 

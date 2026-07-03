@@ -216,14 +216,23 @@ Kamiya may classify user intent and request previews, but Cerbanimo must create 
 
 ## Real-Stack E2E Requirements
 
-The deterministic browser contract uses a local fixture. The real-stack profile still requires Cerbanimo support before it can run safely by default:
+The deterministic browser contract uses a local fixture. The real-stack profile is now implemented and tested through the Kamiya launcher plus Cerbanimo PR #145 descendant:
 
 - isolated local database or schema with `e2e` or `test` in its name;
 - refusal to run destructive cleanup when the target name lacks that marker;
 - deterministic project-bootstrap generator selected by explicit e2e env, impossible in production;
-- optional provider modes for delayed success, one retryable failure then success, and invalid graph;
+- provider modes for delayed success, hold-before-persist, one retryable failure then success, and invalid graph;
 - a scoped e2e actor/token;
-- database verifier for one action, one workflow, seven step rows, one project, one outcome, valid tasks/dependencies, active root tasks, executed action, completed workflow, and secret-free event payloads.
+- database verifier for one action, one workflow, project/outcome/task counts, valid dependencies, active root tasks, executed action, completed workflow, retry/cancel/block invariants, and secret-free event payloads.
+
+Run from Kamiya:
+
+```bash
+npm run test:e2e:integration
+npm run test:e2e:failure
+```
+
+The launcher validates the Cerbanimo dependency SHA, starts the real Cerbanimo `/api/v1` API plus pg-boss worker, clears live Gemini keys, writes redacted logs, and drops only the generated e2e database unless `KAMIYA_REAL_STACK_KEEP_DB=1` is set.
 
 ## Recommended Model Configuration
 

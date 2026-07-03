@@ -58,6 +58,9 @@ function sanitizeSession(session: KamiyaSessionState): KamiyaSessionState {
     mode: session.mode,
     lastProjectAction: undefined,
     actionHistory: session.actionHistory?.slice(0, 5),
-    activeAction: session.activeAction
+    activeAction: session.activeAction,
+    e2eScenario: session.e2eScenario,
+    e2eRunId: session.e2eRunId,
+    e2eControlDir: session.e2eControlDir
   };
 }

@@ -124,7 +124,7 @@ async function buildChatTurnResponse(request: ChatTurnRequest): Promise<ChatTurn
       );
     }
 
-    const action = previewProjectCreation(analysis.draft);
+    const action = withE2EScenario(previewProjectCreation(analysis.draft), request.session);
     const preview = await cerbanimo.previewProjectBootstrap(action);
     if (!preview.ok || !preview.data) {
       return respond(
@@ -596,4 +596,17 @@ function nextIncompleteStage(detail: ProjectBootstrapActionDetail): string | und
   const completed = new Set(detail.steps.filter((step) => step.status === "completed" || step.status === "skipped").map((step) => step.step_name));
   return ["validateInput", "generateProjectPlan", "generateTaskGraph", "validateTaskGraph", "persistProjectGraph", "activateRootTasks", "finalizeAction"]
     .find((stage) => !completed.has(stage));
+}
+
+function withE2EScenario(action: ReturnType<typeof previewProjectCreation>, session: ChatTurnRequest["session"]): ReturnType<typeof previewProjectCreation> {
+  if (process.env.KAMIYA_REAL_STACK_E2E !== "1" || !session.e2eScenario) return action;
+  return {
+    ...action,
+    payload: {
+      ...action.payload,
+      _e2eScenario: session.e2eScenario,
+      _e2eRunId: session.e2eRunId,
+      _e2eControlDir: session.e2eControlDir
+    }
+  };
 }
