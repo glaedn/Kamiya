@@ -25,15 +25,20 @@ Covered by `golden-conversation.contract.spec.ts`, `golden-conversation.integrat
 
 ## Stage 2: Active Task Classification
 
-Status: not implemented.
+Status: implemented for classification display and read-only assisted input summaries.
 
-Required platform/API dependencies:
+Covered by `golden-conversation.contract.spec.ts`, `golden-conversation.integration.spec.ts`, and the real-stack database verifier:
 
-- task automation eligibility metadata on Cerbanimo tasks;
-- an endpoint that classifies tasks as human-driven, assisted automation, or fully automatable;
-- a documented action function for queuing automation against a specific task.
+- Cerbanimo stores durable task automation metadata on each generated task;
+- active tasks hydrate through `GET /api/v1/actions/:id` with canonical `automation` metadata;
+- Kamiya renders `Human task`, `Automation-assisted`, and `Automation-ready classification`;
+- assisted tasks expose a read-only required-input summary;
+- fully automatable tasks expose capability, artifact, and validation requirements;
+- no enabled `Automate` control is rendered;
+- refresh preserves the classification display;
+- DB verification asserts the deterministic 1/1/1 category mix and invariants.
 
-Future Packet 004 should add continuation coverage after the project result cards render active tasks.
+Not implemented in Stage 2: assisted input submission, task automation execution, artifact validation, rewards, or task acceptance.
 
 ## Packet 003A Skipped-Test Inventory
 

@@ -79,10 +79,26 @@ test.describe("golden conversation contract", () => {
       await expect(page.getByText("Active root tasks")).toBeVisible();
       await expect(page.getByText("Map governance requirements")).toBeVisible();
       await expect(page.getByText("Prototype constitution voting")).toBeVisible();
+      await expect(page.getByText("Run baseline repository quality checks")).toBeVisible();
+      await expect(page.getByText("Human task").first()).toBeVisible();
+      await expect(page.getByText("Automation-assisted").first()).toBeVisible();
+      await expect(page.getByText("Automation-ready classification").first()).toBeVisible();
+      await expect(page.getByText("github.run_quality_checks").first()).toBeVisible();
+      await expect(page.getByText("quality-check-report").first()).toBeVisible();
+      await expect(page.getByRole("button", { name: /^Automate$/i })).toHaveCount(0);
       await expect(page.getByRole("button", { name: "Open created project" })).toBeVisible();
       await page.getByRole("button", { name: "Explore active tasks" }).click();
       await expect(page.getByText("Here are the active tasks Cerbanimo says can begin now.")).toBeVisible();
+      await expect(page.getByText("Needs 4 inputs: Repository, Target branch, Acceptance criteria, ...").first()).toBeVisible();
+      await page.getByRole("button", { name: "View required inputs" }).first().click();
+      await expect(page.getByText("Execution is not enabled in this release.").first()).toBeVisible();
+      await expect(page.getByText("Approval before external effects.").first()).toBeVisible();
       await page.screenshot({ path: path.join(screenshotDir, "05-completed-project.png") });
+
+      await page.reload();
+      await expect(page.getByText("Human task").first()).toBeVisible();
+      await expect(page.getByText("Automation-assisted").first()).toBeVisible();
+      await expect(page.getByText("Automation-ready classification").first()).toBeVisible();
 
       const state = await fixtureState(request);
       expect(state.actions).toBe(1);

@@ -72,6 +72,16 @@ export function ResponseCard({ card, onAction, isBusy = false }: ResponseCardPro
               <div>
                 <strong>{item.title}</strong>
                 {item.subtitle ? <span>{item.subtitle}</span> : null}
+                {item.metadata ? (
+                  <dl className="item-metadata">
+                    {Object.entries(item.metadata).map(([key, value]) => (
+                      <div key={key}>
+                        <dt>{humanize(key)}</dt>
+                        <dd>{String(value)}</dd>
+                      </div>
+                    ))}
+                  </dl>
+                ) : null}
               </div>
               {item.status ? <em>{item.status}</em> : null}
             </div>

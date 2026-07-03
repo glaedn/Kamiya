@@ -33,6 +33,63 @@ const cerbanimoActionSchema = z.object({
   executed_at: z.string().optional().nullable()
 }).passthrough();
 
+const taskAutomationSchema = z.object({
+  classification: z.enum(["human_driven", "assisted_automation", "fully_automatable"]).catch("human_driven"),
+  confidenceBand: z.enum(["low", "medium", "high"]).nullable().optional().catch(null),
+  rationale: z.string().optional().catch(undefined),
+  requiredHumanInputs: z.array(z.object({
+    key: z.string(),
+    label: z.string(),
+    description: z.string().optional(),
+    inputType: z.string(),
+    required: z.boolean().default(true),
+    sensitive: z.boolean().default(false),
+    options: z.array(z.object({ value: z.string(), label: z.string() })).optional()
+  }).passthrough()).default([]).catch([]),
+  requirements: z.object({
+    capabilities: z.array(z.string()).optional().catch([]),
+    tools: z.array(z.string()).optional().catch([]),
+    externalServices: z.array(z.string()).optional().catch([]),
+    permissions: z.array(z.string()).optional().catch([]),
+    expectedArtifacts: z.array(z.string()).optional().catch([]),
+    estimatedDurationMinutes: z.number().optional(),
+    networkAccess: z.enum(["none", "restricted", "required"]).optional().catch("none")
+  }).passthrough().default({}).catch({}),
+  validationRequirements: z.array(z.object({
+    requirementId: z.string(),
+    description: z.string().optional(),
+    proofTypes: z.array(z.string()).optional(),
+    checks: z.array(z.string()).optional()
+  }).passthrough()).default([]).catch([]),
+  source: z.enum(["generated", "manual", "legacy_default", "policy_downgrade", "review_override"]).optional().catch("legacy_default"),
+  version: z.string().optional(),
+  classifiedAt: z.string().nullable().optional(),
+  findings: z.array(z.object({
+    code: z.string().optional(),
+    field: z.string().optional(),
+    message: z.string().optional()
+  }).passthrough()).default([]).catch([])
+}).passthrough().catch({
+  classification: "human_driven",
+  requiredHumanInputs: [],
+  requirements: {},
+  validationRequirements: [],
+  source: "legacy_default",
+  findings: []
+});
+
+const taskSchema = z.object({
+  id: z.union([z.number(), z.string()]),
+  automation: taskAutomationSchema.optional().default({
+    classification: "human_driven",
+    requiredHumanInputs: [],
+    requirements: {},
+    validationRequirements: [],
+    source: "legacy_default",
+    findings: []
+  })
+}).passthrough();
+
 const projectBootstrapActionDetailSchema = z.object({
   action: cerbanimoActionSchema,
   workflow: z.object({
@@ -58,8 +115,8 @@ const projectBootstrapActionDetailSchema = z.object({
     completed_at: z.string().optional().nullable()
   }).passthrough()).default([]),
   project: z.object({ id: z.number() }).passthrough().nullable().optional(),
-  tasks: z.array(z.object({ id: z.union([z.number(), z.string()]) }).passthrough()).default([]),
-  activeTasks: z.array(z.object({ id: z.union([z.number(), z.string()]) }).passthrough()).default([]),
+  tasks: z.array(taskSchema).default([]),
+  activeTasks: z.array(taskSchema).default([]),
   terminal: z.boolean().default(false),
   result: z.unknown().optional().nullable(),
   error: z.unknown().optional().nullable()

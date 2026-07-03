@@ -177,3 +177,19 @@ Consequences: Kamiya may cache safe action identifiers in session state, but Cer
 Repository evidence: Kamiya current branch: [server/services/cerbanimoClient.ts](../../server/services/cerbanimoClient.ts), [server/services/chatService.ts](../../server/services/chatService.ts), [e2e/golden-conversation.contract.spec.ts](../../e2e/golden-conversation.contract.spec.ts); Cerbanimo PR #145 `091f7ee`.
 
 Follow-up work: Enable real-stack e2e with isolated Cerbanimo database and deterministic bootstrap generator, then implement task automation classification.
+
+## ADR-012
+
+Date: 2026-07-03
+
+Decision: Task automation classification is durable eligibility metadata, not execution permission.
+
+Status: accepted
+
+Rationale: Users need truthful active-task semantics, but a model-generated or normalized classification must never grant capability availability, actor authorization, confirmation, execution, or validation.
+
+Consequences: Cerbanimo stores and normalizes task classification before persistence. Kamiya renders `human_driven`, `assisted_automation`, and `fully_automatable` categories, but does not show an enabled Automate control until a later packet implements capability resolution, authorization, action preview, worker execution, and validation.
+
+Repository evidence: Cerbanimo Packet 004 branch: `backend/services/TaskAutomationClassificationService.js`, `models/tasks.js`, `backend/services/ProjectBootstrapService.js`, `backend/routes/api_v1/index.js`; Kamiya Packet 004 branch: [server/services/cardFactory.ts](../../server/services/cardFactory.ts), [server/services/cerbanimoClient.ts](../../server/services/cerbanimoClient.ts), [docs/task-automation-classification.md](../task-automation-classification.md).
+
+Follow-up work: Packet 005 Assisted Automation Input Contracts and Preparation Flow.

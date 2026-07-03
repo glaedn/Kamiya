@@ -32,6 +32,29 @@ Kamiya depends on:
 
 Kamiya's browser state is only a resumable cache. Cerbanimo remains authoritative for action ownership, workflow status, retryability, project IDs, and task activation.
 
+### Durable Task Automation Classification
+
+Status: required for Golden Conversation Stage 2 and implemented in Packet 004 branches.
+
+Cerbanimo must store task automation eligibility on every task:
+
+- `automation_classification`
+- `automation_confidence`
+- `automation_rationale`
+- `required_human_inputs`
+- `automation_requirements`
+- `validation_requirements`
+- `automation_policy_findings`
+- `classification_source`
+- `classification_version`
+- `classified_at`
+
+Canonical classifications are `human_driven`, `assisted_automation`, and `fully_automatable`. Existing and legacy tasks default to `human_driven`; no migration should call an LLM.
+
+`GET /api/v1/actions/:id`, `GET /api/v1/tasks`, and `GET /api/v1/tasks/:id` should expose a stable `automation` object with classification, confidence band, rationale, required human inputs, requirements, validation requirements, source, version, classified timestamp, and policy findings.
+
+Classification is eligibility only. Cerbanimo must keep capability availability, authorization, confirmation, execution, and validation as separate contracts.
+
 ### `POST /ai/intent-route`
 
 Central platform endpoint for model-independent intent routing. Kamiya can route locally today, but this should become a Cerbanimo API so future clients share a single intent taxonomy.

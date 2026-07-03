@@ -159,7 +159,7 @@ function detailFor(action: FixtureAction) {
       status: "executed",
       projectId: 100,
       taskCount: 3,
-      activeTaskCount: 2,
+      activeTaskCount: 3,
       activeTasks: activeTasks()
     };
   }
@@ -215,7 +215,8 @@ function allTasks() {
       skill_name: "Product research",
       skill_level: 2,
       reward_tokens: 25,
-      dependencies: []
+      dependencies: [],
+      automation: humanAutomation()
     },
     {
       id: 202,
@@ -226,24 +227,73 @@ function allTasks() {
       skill_name: "Frontend engineering",
       skill_level: 3,
       reward_tokens: 40,
-      dependencies: []
+      dependencies: [],
+      automation: assistedAutomation()
     },
     {
       id: 203,
       project_id: 100,
-      name: "Publish coordination ledger",
-      description: "Expose transparent economic activity records after the governance model is defined.",
-      status: "inactive-unassigned",
-      skill_name: "Backend engineering",
-      skill_level: 3,
+      name: "Run baseline repository quality checks",
+      description: "Run the known repository quality-check command and return a bounded report.",
+      status: "active-unassigned",
+      skill_name: "Quality assurance",
+      skill_level: 2,
       reward_tokens: 50,
-      dependencies: [201, 202]
+      dependencies: [],
+      automation: fullyAutomatableAutomation()
     }
   ];
 }
 
 function activeTasks() {
   return allTasks().filter((task) => task.status.startsWith("active"));
+}
+
+function humanAutomation() {
+  return {
+    classification: "human_driven",
+    confidenceBand: "high",
+    rationale: "This task requires stakeholder interviews and judgment.",
+    requiredHumanInputs: [],
+    requirements: {},
+    validationRequirements: [{ requirementId: "notes", description: "Stakeholder notes are reviewed.", proofTypes: ["document"], checks: ["human_review"] }],
+    source: "generated",
+    version: "task-automation-v1",
+    findings: []
+  };
+}
+
+function assistedAutomation() {
+  return {
+    classification: "assisted_automation",
+    confidenceBand: "medium",
+    rationale: "Kamiya can help once repository, branch, criteria, and approval are supplied.",
+    requiredHumanInputs: [
+      { key: "repository", label: "Repository", description: "Repository to work in.", inputType: "repository", required: true, sensitive: false },
+      { key: "target_branch", label: "Target branch", description: "Branch to target.", inputType: "text", required: true, sensitive: false },
+      { key: "acceptance_criteria", label: "Acceptance criteria", description: "Review criteria.", inputType: "long_text", required: true, sensitive: false },
+      { key: "approval", label: "Approval", description: "Approval before external effects.", inputType: "approval", required: true, sensitive: false }
+    ],
+    requirements: { capabilities: ["github.generate_pull_request"], expectedArtifacts: ["pull-request-draft"], networkAccess: "restricted" },
+    validationRequirements: [{ requirementId: "approval", description: "Human approval is recorded.", proofTypes: ["review_note"], checks: ["human_approval"] }],
+    source: "generated",
+    version: "task-automation-v1",
+    findings: []
+  };
+}
+
+function fullyAutomatableAutomation() {
+  return {
+    classification: "fully_automatable",
+    confidenceBand: "high",
+    rationale: "This task is bounded digital verification with an explicit report artifact.",
+    requiredHumanInputs: [],
+    requirements: { capabilities: ["github.run_quality_checks"], expectedArtifacts: ["quality-check-report"], tools: ["git", "npm"], networkAccess: "restricted" },
+    validationRequirements: [{ requirementId: "checks-pass", description: "Command result is captured.", proofTypes: ["automation_log", "command_result"], checks: ["exit_code_recorded"] }],
+    source: "generated",
+    version: "task-automation-v1",
+    findings: []
+  };
 }
 
 function envelope(data: unknown, requestId: string) {

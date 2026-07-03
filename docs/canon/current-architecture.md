@@ -1,6 +1,6 @@
 # Current Architecture
 
-Evidence basis: Kamiya branch `kamiya/m2-golden-conversation-v1`; Cerbanimo branch `kamiya/m1-durable-project-bootstrap`. This file describes current repository behavior, not intended future behavior unless labeled as such.
+Evidence basis: Kamiya branch `kamiya/m3-task-automation-classification`; Cerbanimo branch `kamiya/m2-task-automation-classification`. This file describes current repository behavior, not intended future behavior unless labeled as such.
 
 ## 1. System Context
 
@@ -250,3 +250,29 @@ The isolated real-stack profile now exercises the same browser journey through a
 - deterministic Cerbanimo project-bootstrap provider at the external generation seam only.
 
 Real-stack startup is owned by [e2e/real-stack/start-real-stack.ts](../../e2e/real-stack/start-real-stack.ts). It validates the Cerbanimo dependency SHA, creates and drops only a protected e2e database, clears live Gemini keys from the test processes, seeds scoped E2E actors, and writes local artifacts to gitignored directories. The failure profile covers timeout retry, invalid graph block, cancel-before-persist, network interruption, duplicate confirmation, missing auth, and cross-user hydration denial.
+
+## 12. Packet 004 Task Classification Delta
+
+Evidence basis: Kamiya and Cerbanimo Packet 004 branches.
+
+```mermaid
+flowchart LR
+  Generator["Cerbanimo task generator"] --> Normalizer["TaskAutomationClassificationService"]
+  Normalizer --> Validator["ProjectTaskGraphValidator"]
+  Validator --> Persist["ProjectBootstrapService inserts task metadata"]
+  Persist --> Api["/api/v1 action and task hydration"]
+  Api --> KamiyaClient["Kamiya CerbanimoClient zod parser"]
+  KamiyaClient --> Cards["Active task cards"]
+```
+
+Cerbanimo now persists `automation_classification`, confidence, rationale, required human inputs, automation requirements, validation requirements, policy findings, source, version, and timestamp on `tasks`.
+
+The normalizer is deterministic and never calls an LLM. It applies fail-closed rules before persistence, including local/physical work, binding governance decisions, financial commitments, destructive actions, unspecified credentials, and external publication without approval. Existing tasks default to `human_driven` and `legacy_default`.
+
+`GET /api/v1/actions/:id`, `/api/v1/tasks`, and `/api/v1/tasks/:id` expose a canonical `automation` object. Kamiya parses that object, falls back malformed or missing metadata to human-driven, and renders labels plus summaries:
+
+- `Human task`;
+- `Automation-assisted`;
+- `Automation-ready classification`.
+
+Packet 004 intentionally does not execute automation. Fully automatable cards say execution capability is not connected yet, and Kamiya does not render an enabled `Automate` button.

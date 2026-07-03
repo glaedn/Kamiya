@@ -1,6 +1,6 @@
 # Recommended Next Packets
 
-Evidence basis: Kamiya branch `kamiya/m2-golden-conversation-v1`; Cerbanimo branch `kamiya/m1-durable-project-bootstrap`. Golden Conversation v1 real-stack acceptance is now complete, so the next packet should move forward into task automation classification instead of more bootstrap proof.
+Evidence basis: Kamiya branch `kamiya/m3-task-automation-classification`; Cerbanimo branch `kamiya/m2-task-automation-classification`. Golden Conversation v1 now reaches active task classification, but task execution and assisted-input submission remain intentionally unimplemented.
 
 ## Completed Baseline: Packet 002 Project Creation Bootstrap
 
@@ -38,37 +38,35 @@ Estimated size: L
 
 Proof of completion: Kamiya calls `/api/v1/actions/preview`, `/confirm`, and action hydration for `projects.bootstrap`; request IDs appear in responses; legacy `/platform`, `/projects/create`, and `/projects/auto-generate` calls are blocked by browser tests for the golden path.
 
-## Packet 004: Task Automation Classification
+## Completed Baseline: Packet 004 Task Automation Classification
 
-Goal: Classify active tasks as human-driven, assisted automation, or fully automatable using authoritative Cerbanimo task metadata and capability policy.
+Status: complete for durable classification metadata and truthful Kamiya rendering.
 
-User-visible outcome: After Kamiya creates a project, active task cards clearly show whether Cami should do the task, supply inputs for Kamiya to help, or allow Kamiya to queue an automation after confirmation.
+Original goal: Classify active tasks as human-driven, assisted automation, or fully automatable using authoritative Cerbanimo task metadata and capability policy.
 
-Repository scope: Cerbanimo task schema/metadata, task generation prompt validation, capability registry, `/api/v1/tasks` or action detail payloads; Kamiya task cards and Golden Conversation continuation tests.
+User-visible outcome: After Kamiya creates a project, active task cards clearly show whether Cami should do the task, inspect inputs for assisted automation, or understand that a task is classified for bounded automation once an execution capability is connected.
 
-Dependencies: Golden Conversation v1 bootstrap contract and task graph persistence.
+Repository scope: Cerbanimo task schema/metadata, task generation prompt validation, deterministic normalization, `/api/v1/tasks` and action detail payloads; Kamiya task cards and Golden Conversation continuation tests.
 
-Primary risk: Classification becomes AI-only and non-auditable instead of platform-owned metadata.
+Primary risk addressed: Classification is durable platform metadata and normalized before persistence, not a client-side or AI-only inference.
 
-Estimated size: M
+Proof of completion: Generated and manual tasks expose classification metadata; deterministic provider includes one task in each category; Kamiya renders distinct labels and required-input summaries without fake Automate controls; browser and DB verification assert the category mix.
 
-Proof of completion: Generated and manual tasks expose classification plus required human-input metadata; Kamiya renders distinct actions without fake controls; the golden conversation continues from project creation into the first active-task choice.
+## Packet 005: Assisted Automation Input Contracts And Preparation Flow
 
-## Packet 005: Persistent Action Queue And Audit Log
+Goal: Turn `required_human_inputs` into a secure, schema-driven preparation flow that collects inputs and produces a reviewable automation action preview without executing arbitrary work.
 
-Goal: Make Cerbanimo `api_actions` the source of truth for every Kamiya mutation.
+User-visible outcome: For an assisted task, Cami can open the required-input summary, supply repository/branch/approval/context fields, and receive a safe preview of what Kamiya could prepare next.
 
-User-visible outcome: Every state-changing request has durable preview, confirmation, execution status, retry state, and history.
+Repository scope: Cerbanimo task input schema validation, action preview payloads for prepared automation, optional draft storage, and capability/authorization introspection; Kamiya read/write assisted-input form and preview cards.
 
-Repository scope: Cerbanimo `models/kamiya_api.js`, `backend/services/ActionQueueService.js`, `/api/v1/actions`; Kamiya action preview and confirmation flow.
+Dependencies: Packet 004 task automation metadata and existing `/api/v1/actions` preview/confirm contract.
 
-Dependencies: API foundation and permission introspection.
-
-Primary risk: Existing direct legacy mutations bypass the action queue.
+Primary risk: Treating user-supplied inputs as immediate permission to execute. Packet 005 should stop at a reviewable preview.
 
 Estimated size: L
 
-Proof of completion: Kamiya project creation and automation use persisted action IDs; audit events exist for preview, confirm, execute, fail, retry, cancel.
+Proof of completion: Assisted task inputs validate against Cerbanimo-provided schemas, sensitive values are represented only as secret references, previews are durable action records, no worker executes, and browser tests cover desktop/mobile form behavior.
 
 ## Packet 006: `run_quality_checks` Worker
 

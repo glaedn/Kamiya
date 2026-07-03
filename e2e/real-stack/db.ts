@@ -12,6 +12,7 @@ export interface DatabaseReport {
   taskCount: number;
   rootTaskCount: number;
   activeRootTaskCount: number;
+  classificationCounts: Record<"human_driven" | "assisted_automation" | "fully_automatable", number>;
   actionStatus?: string;
   workflowStatus?: string;
   attemptCount?: number;
@@ -49,6 +50,17 @@ export async function databaseReportForRun(runId: string): Promise<DatabaseRepor
       : { rows: [] };
     const rootTasks = tasks.rows.filter((task) => !Array.isArray(task.dependencies) || task.dependencies.length === 0);
     const activeRootTasks = rootTasks.filter((task) => /^active|^urgent|^ready|^open/i.test(String(task.status)));
+    const classificationCounts = {
+      human_driven: 0,
+      assisted_automation: 0,
+      fully_automatable: 0
+    };
+    for (const task of tasks.rows) {
+      const classification = String(task.automation_classification ?? "human_driven");
+      if (classification in classificationCounts) {
+        classificationCounts[classification as keyof typeof classificationCounts] += 1;
+      }
+    }
     const events = action
       ? await client.query(`SELECT event_type FROM api_action_events WHERE action_id = $1 ORDER BY created_at ASC`, [action.id])
       : { rows: [] };
@@ -63,6 +75,7 @@ export async function databaseReportForRun(runId: string): Promise<DatabaseRepor
       taskCount: tasks.rows.length,
       rootTaskCount: rootTasks.length,
       activeRootTaskCount: activeRootTasks.length,
+      classificationCounts,
       actionStatus: action?.status,
       workflowStatus: workflow?.status,
       attemptCount: workflow?.attempt_count == null ? undefined : Number(workflow.attempt_count),
@@ -87,6 +100,7 @@ export async function expectSuccessfulBootstrap(runId: string): Promise<Database
   expect(report.eventTypes).toContain("workflow.completed");
   expect(report.eventTypes).toContain("action.executed");
   await expectGraphAcyclic(report.projectId);
+  await expectTaskAutomationClassifications(report.projectId);
   await expectNoSecretsForRun(runId);
   return report;
 }
@@ -161,6 +175,49 @@ async function expectGraphAcyclic(projectId?: number): Promise<void> {
     for (const id of ids) {
       expect(visit(id), `task dependency graph cycle at ${id}`).toBe(true);
     }
+  });
+}
+
+async function expectTaskAutomationClassifications(projectId?: number): Promise<void> {
+  expect(projectId).toBeTruthy();
+  await withClient(async (client) => {
+    const result = await client.query(
+      `SELECT
+         name,
+         automation_classification,
+         required_human_inputs,
+         automation_requirements,
+         automation_policy_findings
+       FROM tasks
+       WHERE project_id = $1
+       ORDER BY id ASC`,
+      [projectId]
+    );
+    const counts = {
+      human_driven: 0,
+      assisted_automation: 0,
+      fully_automatable: 0
+    };
+    for (const task of result.rows) {
+      const classification = String(task.automation_classification ?? "human_driven");
+      expect(classification in counts, `known classification for ${task.name}`).toBe(true);
+      counts[classification as keyof typeof counts] += 1;
+    }
+    expect(counts).toEqual({
+      human_driven: 1,
+      assisted_automation: 1,
+      fully_automatable: 1
+    });
+
+    const human = result.rows.find((task) => task.automation_classification === "human_driven");
+    const assisted = result.rows.find((task) => task.automation_classification === "assisted_automation");
+    const fully = result.rows.find((task) => task.automation_classification === "fully_automatable");
+    expect(String(human?.name)).toContain("Map governance requirements");
+    expect(String(human?.automation_classification)).not.toBe("fully_automatable");
+    expect((assisted?.required_human_inputs ?? []).length).toBeGreaterThan(0);
+    expect((fully?.required_human_inputs ?? [])).toHaveLength(0);
+    expect((fully?.automation_requirements?.capabilities ?? [])).toContain("github.run_quality_checks");
+    expect((fully?.automation_requirements?.expectedArtifacts ?? [])).toContain("quality-check-report");
   });
 }
 

@@ -166,23 +166,76 @@ export function projectResultCards(detail: ProjectBootstrapActionDetail): Respon
 }
 
 export function activeTaskCard(tasks: CerbanimoTask[]): ResponseCard {
+  const counts = classificationCounts(tasks);
+  const assistedTask = tasks.find((task) => task.automation?.classification === "assisted_automation");
   return {
     id: crypto.randomUUID(),
     kind: "task",
     title: "Active root tasks",
     subtitle: `${tasks.length} active task${tasks.length === 1 ? "" : "s"}`,
-    body: "These tasks are active now because their dependencies are clear.",
+    body: [
+      "These tasks are active now because their dependencies are clear.",
+      classificationNarrative(counts)
+    ].join("\n\n"),
+    metadata: {
+      humanTasks: counts.human_driven,
+      assistedTasks: counts.assisted_automation,
+      automationReadyClassifications: counts.fully_automatable
+    },
     items: tasks.map((task) => ({
       id: String(task.id),
       title: String(task.name ?? task.title ?? "Untitled task"),
-      subtitle: String(task.description ?? task.skill_name ?? "Cerbanimo task"),
-      status: String(task.status ?? "active"),
+      subtitle: taskSubtitle(task),
+      status: automationLabel(task),
       metadata: {
+        taskStatus: String(task.status ?? "active"),
+        classification: automationLabel(task),
+        automationSummary: automationSummary(task),
+        requiredInputs: requiredInputSummary(task),
+        requiredCapability: capabilitySummary(task),
+        expectedArtifact: artifactSummary(task),
+        validation: validationSummary(task),
         skill: String(task.skill_name ?? "Unspecified"),
         skillLevel: Number(task.skill_level ?? 0),
         rewardTokens: Number(task.reward_tokens ?? 0),
         dueDate: String(task.due_date ?? "none"),
         dependencies: dependencySummary(task.dependencies)
+      }
+    })),
+    actions: assistedTask
+      ? [{ id: "view-required-inputs", label: "View required inputs", style: "secondary", command: `view required inputs ${assistedTask.id}` }]
+      : undefined
+  };
+}
+
+export function assistedTaskInputsCard(tasks: CerbanimoTask[], taskId?: string): ResponseCard {
+  const task = tasks.find((item) => String(item.id) === String(taskId))
+    ?? tasks.find((item) => item.automation?.classification === "assisted_automation");
+  const inputs = task?.automation?.requiredHumanInputs ?? [];
+
+  return {
+    id: crypto.randomUUID(),
+    kind: "task",
+    title: task ? `Required inputs: ${String(task.name ?? "Assisted task")}` : "Required inputs",
+    subtitle: "Read-only assisted automation preparation",
+    body: task
+      ? "Kamiya can help prepare this task after these inputs and permissions are supplied. Execution is not enabled in this release."
+      : "Cerbanimo did not return an assisted task with input requirements.",
+    metadata: {
+      classification: task ? automationLabel(task) : "Human task",
+      requiredInputs: inputs.length,
+      requiredCapability: task ? capabilitySummary(task) : "none",
+      expectedArtifact: task ? artifactSummary(task) : "none"
+    },
+    items: inputs.map((input) => ({
+      id: input.key,
+      title: input.label,
+      subtitle: input.description || input.inputType,
+      status: input.required ? "required" : "optional",
+      metadata: {
+        key: input.key,
+        inputType: input.inputType,
+        sensitive: input.sensitive ? "yes" : "no"
       }
     }))
   };
@@ -477,4 +530,68 @@ function normalizeError(error: unknown): { code?: string | number; message?: str
 function dependencySummary(value: unknown): string {
   if (!Array.isArray(value) || value.length === 0) return "none";
   return `${value.length} dependenc${value.length === 1 ? "y" : "ies"}`;
+}
+
+function classificationCounts(tasks: CerbanimoTask[]): Record<"human_driven" | "assisted_automation" | "fully_automatable", number> {
+  return tasks.reduce((counts, task) => {
+    const classification = task.automation?.classification ?? "human_driven";
+    counts[classification] += 1;
+    return counts;
+  }, { human_driven: 0, assisted_automation: 0, fully_automatable: 0 });
+}
+
+function classificationNarrative(counts: Record<"human_driven" | "assisted_automation" | "fully_automatable", number>): string {
+  const pieces = [];
+  if (counts.human_driven > 0) pieces.push(`${counts.human_driven} need human participation or judgment`);
+  if (counts.assisted_automation > 0) pieces.push(`${counts.assisted_automation} can be prepared for assisted automation after inputs are supplied`);
+  if (counts.fully_automatable > 0) pieces.push(`${counts.fully_automatable} are classified as suitable for bounded automation once execution capability is connected`);
+  return pieces.length ? `Your first tasks are active: ${pieces.join("; ")}.` : "Your first tasks are active.";
+}
+
+function automationLabel(task: CerbanimoTask): string {
+  const classification = task.automation?.classification ?? "human_driven";
+  if (classification === "assisted_automation") return "Automation-assisted";
+  if (classification === "fully_automatable") return "Automation-ready classification";
+  return "Human task";
+}
+
+function automationSummary(task: CerbanimoTask): string {
+  const automation = task.automation;
+  if (!automation || automation.source === "legacy_default") {
+    return "This task predates automation classification and defaults to human execution.";
+  }
+  if (automation.classification === "assisted_automation") {
+    return `Kamiya can help after the required inputs and permissions are supplied. ${requiredInputSummary(task)}.`;
+  }
+  if (automation.classification === "fully_automatable") {
+    return "This task has enough context for bounded automation. Execution capability has not been connected yet.";
+  }
+  return "This work needs a person's judgment, participation, or physical action.";
+}
+
+function taskSubtitle(task: CerbanimoTask): string {
+  const description = String(task.description ?? task.skill_name ?? "Cerbanimo task");
+  return `${description} ${automationLabel(task)}.`;
+}
+
+function requiredInputSummary(task: CerbanimoTask): string {
+  const inputs = task.automation?.requiredHumanInputs ?? [];
+  if (inputs.length === 0) return "No required human inputs";
+  return `Needs ${inputs.length} input${inputs.length === 1 ? "" : "s"}: ${inputs.slice(0, 3).map((input) => input.label).join(", ")}${inputs.length > 3 ? ", ..." : ""}`;
+}
+
+function capabilitySummary(task: CerbanimoTask): string {
+  const capabilities = task.automation?.requirements?.capabilities ?? [];
+  return capabilities.length ? capabilities.join(", ") : "Execution capability not connected yet";
+}
+
+function artifactSummary(task: CerbanimoTask): string {
+  const artifacts = task.automation?.requirements?.expectedArtifacts ?? [];
+  return artifacts.length ? artifacts.join(", ") : "none";
+}
+
+function validationSummary(task: CerbanimoTask): string {
+  const validation = task.automation?.validationRequirements ?? [];
+  if (validation.length === 0) return "No validation requirements listed";
+  return validation.slice(0, 2).map((item) => item.description || item.requirementId).join("; ");
 }

@@ -148,6 +148,41 @@ Golden Conversation v1 verification covers this contract through:
 
 The real-stack profile asserts that the golden project path does not call `/platform`, `/projects/create`, or `/projects/auto-generate`.
 
+## Task Automation Classification
+
+Cerbanimo `/api/v1` task payloads include a canonical `automation` object on task list/detail responses and on `GET /api/v1/actions/:id` bootstrap hydration.
+
+```json
+{
+  "id": 203,
+  "name": "Run baseline repository quality checks",
+  "status": "active-unassigned",
+  "automation": {
+    "classification": "fully_automatable",
+    "confidenceBand": "high",
+    "rationale": "The task is bounded digital work with a known capability and expected quality-check report.",
+    "requiredHumanInputs": [],
+    "requirements": {
+      "capabilities": ["github.run_quality_checks"],
+      "tools": ["git", "npm"],
+      "externalServices": ["github"],
+      "permissions": ["repository:read", "checks:run"],
+      "expectedArtifacts": ["quality-check-report"],
+      "networkAccess": "restricted"
+    },
+    "validationRequirements": [],
+    "source": "generated",
+    "version": "task-automation-v1",
+    "classifiedAt": "2026-07-03T00:00:00.000Z",
+    "findings": []
+  }
+}
+```
+
+Allowed `classification` values are `human_driven`, `assisted_automation`, and `fully_automatable`. Missing or malformed automation metadata must be treated as `human_driven` by clients.
+
+Kamiya renders this metadata but does not infer execution permission from it. Packet 004 supports a read-only `View required inputs` control for assisted tasks and intentionally hides any enabled `Automate` control.
+
 ## Phase 3 Automation Contract
 
 Automation previews include:

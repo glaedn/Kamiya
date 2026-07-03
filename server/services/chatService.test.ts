@@ -205,6 +205,8 @@ describe("handleChatTurn", () => {
     expect(JSON.stringify(response.message.cards)).toContain("Watertown Weekly MtG Meetup");
     expect(response.message.cards?.some((card) => card.title.includes("Active root tasks"))).toBe(true);
     expect(JSON.stringify(response.message.cards)).toContain("Reserve a table");
+    expect(JSON.stringify(response.message.cards)).toContain("Human task");
+    expect(JSON.stringify(response.message.cards)).not.toContain('"label":"Automate"');
   });
 });
 
@@ -276,8 +278,50 @@ function completedDetail() {
       description: "Create a local Watertown weekly get together",
       due_date: "2026-08-01"
     },
-    tasks: [{ id: 1, name: "Reserve a table", description: "Find a venue.", status: "active", reward_tokens: 10, skill_name: "Coordination", skill_level: 1, dependencies: [] }],
-    activeTasks: [{ id: 1, name: "Reserve a table", description: "Find a venue.", status: "active", reward_tokens: 10, skill_name: "Coordination", skill_level: 1, dependencies: [] }],
+    tasks: [
+      {
+        id: 1,
+        name: "Reserve a table",
+        description: "Find a venue.",
+        status: "active",
+        reward_tokens: 10,
+        skill_name: "Coordination",
+        skill_level: 1,
+        dependencies: [],
+        automation: {
+          classification: "human_driven",
+          confidenceBand: "high",
+          rationale: "This task requires a person to coordinate with a local venue.",
+          requiredHumanInputs: [],
+          requirements: {},
+          validationRequirements: [],
+          source: "generated",
+          findings: []
+        }
+      }
+    ],
+    activeTasks: [
+      {
+        id: 1,
+        name: "Reserve a table",
+        description: "Find a venue.",
+        status: "active",
+        reward_tokens: 10,
+        skill_name: "Coordination",
+        skill_level: 1,
+        dependencies: [],
+        automation: {
+          classification: "human_driven",
+          confidenceBand: "high",
+          rationale: "This task requires a person to coordinate with a local venue.",
+          requiredHumanInputs: [],
+          requirements: {},
+          validationRequirements: [],
+          source: "generated",
+          findings: []
+        }
+      }
+    ],
     terminal: true,
     result: null,
     error: null

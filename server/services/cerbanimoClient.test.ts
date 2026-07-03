@@ -65,7 +65,52 @@ describe("CerbanimoClient /api/v1 action contract", () => {
     expect(result.data?.workflow?.status).toBe("completed");
     expect(result.data?.project?.name).toBe("Build a Democratic Digital Economy");
     expect(result.data?.activeTasks).toHaveLength(1);
+    expect(result.data?.activeTasks[0].automation?.classification).toBe("human_driven");
+    expect(result.data?.activeTasks[0].automation?.source).toBe("legacy_default");
     expect(result.requestId).toBe("req-detail");
+  });
+
+  it("parses canonical task automation metadata without upgrading malformed data", async () => {
+    mockFetch({
+      ok: true,
+      data: actionDetail({
+        workflowStatus: "completed",
+        actionStatus: "executed",
+        activeTasks: [
+          {
+            id: 201,
+            name: "Prototype constitution voting",
+            status: "active-unassigned",
+            automation: {
+              classification: "assisted_automation",
+              requiredHumanInputs: [{ key: "repository", label: "Repository", inputType: "repository" }],
+              requirements: { capabilities: ["github.generate_pull_request"] },
+              validationRequirements: [],
+              source: "generated"
+            }
+          },
+          {
+            id: 202,
+            name: "Legacy malformed task",
+            status: "active-unassigned",
+            automation: {
+              classification: "magic_robot",
+              requiredHumanInputs: "not an array",
+              requirements: "not an object"
+            }
+          }
+        ]
+      }),
+      requestId: "req-detail"
+    });
+
+    const result = await new CerbanimoClient(auth).getActionDetail("42");
+
+    expect(result.ok).toBe(true);
+    expect(result.data?.activeTasks[0].automation?.classification).toBe("assisted_automation");
+    expect(result.data?.activeTasks[0].automation?.requiredHumanInputs).toHaveLength(1);
+    expect(result.data?.activeTasks[1].automation?.classification).toBe("human_driven");
+    expect(result.data?.activeTasks[1].automation?.requiredHumanInputs).toEqual([]);
   });
 
   it("supports retry and cancel action mutations", async () => {
@@ -179,7 +224,16 @@ function actionRow(overrides: Record<string, unknown> = {}) {
   };
 }
 
-function actionDetail({ workflowStatus, actionStatus }: { workflowStatus: string; actionStatus: string }) {
+function actionDetail({
+  workflowStatus,
+  actionStatus,
+  activeTasks
+}: {
+  workflowStatus: string;
+  actionStatus: string;
+  activeTasks?: Array<Record<string, unknown>>;
+}) {
+  const hydratedTasks = activeTasks ?? [{ id: 200, name: "Map governance requirements", status: "active-unassigned" }];
   return {
     action: actionRow({ status: actionStatus, related_project_id: workflowStatus === "completed" ? 100 : null }),
     workflow: {
@@ -195,8 +249,8 @@ function actionDetail({ workflowStatus, actionStatus }: { workflowStatus: string
       { id: 2, step_name: "generateProjectPlan", status: workflowStatus === "queued" ? "pending" : "completed" }
     ],
     project: workflowStatus === "completed" ? { id: 100, name: "Build a Democratic Digital Economy", description: "A project." } : null,
-    tasks: workflowStatus === "completed" ? [{ id: 200, name: "Map governance requirements", status: "active-unassigned" }] : [],
-    activeTasks: workflowStatus === "completed" ? [{ id: 200, name: "Map governance requirements", status: "active-unassigned" }] : [],
+    tasks: workflowStatus === "completed" ? hydratedTasks : [],
+    activeTasks: workflowStatus === "completed" ? hydratedTasks : [],
     terminal: workflowStatus === "completed",
     result: null,
     error: null

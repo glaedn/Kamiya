@@ -241,6 +241,45 @@ export interface CerbanimoProject {
   [key: string]: unknown;
 }
 
+export type TaskAutomationClassification = "human_driven" | "assisted_automation" | "fully_automatable";
+
+export interface TaskAutomationInput {
+  key: string;
+  label: string;
+  description?: string;
+  inputType: string;
+  required: boolean;
+  sensitive: boolean;
+  options?: Array<{ value: string; label: string }>;
+}
+
+export interface TaskAutomationMetadata {
+  classification: TaskAutomationClassification;
+  confidenceBand?: "low" | "medium" | "high" | null;
+  rationale?: string;
+  requiredHumanInputs: TaskAutomationInput[];
+  requirements: {
+    capabilities?: string[];
+    tools?: string[];
+    externalServices?: string[];
+    permissions?: string[];
+    expectedArtifacts?: string[];
+    estimatedDurationMinutes?: number;
+    networkAccess?: "none" | "restricted" | "required";
+    [key: string]: unknown;
+  };
+  validationRequirements: Array<{
+    requirementId: string;
+    description?: string;
+    proofTypes?: string[];
+    checks?: string[];
+  }>;
+  source?: "generated" | "manual" | "legacy_default" | "policy_downgrade" | "review_override";
+  version?: string;
+  classifiedAt?: string | null;
+  findings?: Array<{ code?: string; field?: string; message?: string }>;
+}
+
 export interface CerbanimoTask {
   id: number | string;
   project_id?: number;
@@ -254,6 +293,7 @@ export interface CerbanimoTask {
   due_date?: string | null;
   dependencies?: Array<number | string>;
   resolvedDependencies?: Array<number | string>;
+  automation?: TaskAutomationMetadata;
   [key: string]: unknown;
 }
 

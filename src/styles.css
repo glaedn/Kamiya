@@ -401,6 +401,10 @@ dd {
   padding: 10px;
 }
 
+.card-row > div {
+  min-width: 0;
+}
+
 .card-row strong {
   display: block;
   color: var(--ink);
@@ -410,6 +414,28 @@ dd {
 .card-row span {
   display: block;
   margin-top: 2px;
+  font-size: 12px;
+}
+
+.item-metadata {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(150px, 1fr));
+  gap: 6px;
+  margin: 8px 0 0;
+}
+
+.item-metadata div {
+  border: 1px solid var(--line);
+  border-radius: 6px;
+  padding: 6px 8px;
+  background: rgba(9, 17, 32, 0.24);
+}
+
+.item-metadata dt {
+  font-size: 10px;
+}
+
+.item-metadata dd {
   font-size: 12px;
 }
 

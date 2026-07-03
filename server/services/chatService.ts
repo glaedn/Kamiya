@@ -10,6 +10,7 @@ import {
   actionPreviewCard,
   actionQueueCard,
   automationTemplatesCard,
+  assistedTaskInputsCard,
   activeTaskCard,
   integrationCard,
   helpCard,
@@ -61,6 +62,16 @@ async function buildChatTurnResponse(request: ChatTurnRequest): Promise<ChatTurn
       ...request.session,
       activeAction: activeStateFromDetail(detail.data, detail.requestId)
     }, undefined, [activeTaskCard(detail.data.activeTasks)]);
+  }
+
+  if (/^view required inputs\b/i.test(message) && request.session.activeAction?.actionId) {
+    const detail = await new CerbanimoClient(request.auth).getActionDetail(request.session.activeAction.actionUuid ?? request.session.activeAction.actionId);
+    if (!detail.ok || !detail.data) return respond(`I could not refresh task input requirements from Cerbanimo: ${detail.error}`, request.session);
+    const taskId = message.replace(/^view required inputs\b/i, "").trim();
+    return respond("Here are the assisted automation input requirements Cerbanimo returned. Execution is not enabled in this release.", {
+      ...request.session,
+      activeAction: activeStateFromDetail(detail.data, detail.requestId)
+    }, undefined, [assistedTaskInputsCard(detail.data.activeTasks, taskId)]);
   }
 
   if (request.session.pendingAction && isCancel(message)) {

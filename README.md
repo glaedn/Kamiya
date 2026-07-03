@@ -36,6 +36,16 @@ Golden Conversation v1 now passes both profiles:
 
 The older direct project creation plus `/projects/auto-generate` sequence is deprecated for Kamiya's golden project flow.
 
+## Task Automation Classification
+
+Kamiya now renders Cerbanimo's durable task automation eligibility metadata on active task cards:
+
+- `human_driven`: human judgment, participation, or physical action is required.
+- `assisted_automation`: Kamiya can help after required inputs or approvals are supplied.
+- `fully_automatable`: the task is bounded digital work with capability and artifact requirements, but execution is not enabled yet.
+
+This classification is informative only. It does not authorize execution, prove capability availability, or replace user confirmation. See `docs/task-automation-classification.md`.
+
 ## Quick Start
 
 ```bash
@@ -95,4 +105,5 @@ Real-stack safety rules:
 - Database drop/create refuses targets without `e2e` or `test`, and refuses production-like names.
 - Cerbanimo deterministic bootstrap mode refuses startup unless `NODE_ENV=test`, `CERBANIMO_E2E_MODE=true`, and the database target contains `e2e` or `test`.
 - The launcher clears live Gemini keys for the test process and uses scoped E2E API tokens only.
+- The integration DB verifier asserts the generated task mix includes one `human_driven`, one `assisted_automation`, and one `fully_automatable` task.
 - Real-stack artifacts are written under `artifacts/golden-conversation/`, `playwright-report-real-stack/`, and `test-results-real-stack/`; those paths are gitignored.
