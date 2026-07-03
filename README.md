@@ -46,6 +46,14 @@ Kamiya now renders Cerbanimo's durable task automation eligibility metadata on a
 
 This classification is informative only. It does not authorize execution, prove capability availability, or replace user confirmation. See `docs/task-automation-classification.md`.
 
+## Task Automation Preparation And Quality Checks
+
+Kamiya can now ask Cerbanimo for task automation context, save actor-owned preparation drafts, render capability blocker reasons, create a durable `tasks.run_automation` action preview, and confirm the first bounded automation capability: `github.run_quality_checks`.
+
+The quality-check path runs only through Cerbanimo's guarded executor contract. The deterministic executor is for E2E mode only; production remains blocked with `PRODUCTION_SANDBOX_REQUIRED` until a real sandbox provider is configured. Passing quality checks submit the task for review without awarding rewards or marking completion.
+
+See `docs/task-automation-preparation.md` and `docs/run-quality-checks-automation.md`.
+
 ## Quick Start
 
 ```bash
@@ -69,6 +77,8 @@ Copy `.env.example` to `.env` and configure:
 - `VITE_CERBANIMO_API_BASE`: Cerbanimo API base used for user-scoped Auth0 token calls.
 - `KAMIYA_ALLOWED_ORIGIN`: web client origin for CORS.
 - `KAMIYA_CERBANIMO_TIMEOUT_MS`: optional server-side timeout for Cerbanimo API requests.
+- `KAMIYA_DEFAULT_QUALITY_CHECK_REPOSITORY`: optional `owner/repository` default for the Packet 006 quality-check flow.
+- `KAMIYA_DEFAULT_QUALITY_CHECK_REF`: optional default ref for quality checks.
 
 For popup login, Cerbanimo must allow Kamiya's browser origin in its auth bridge settings and Auth0 callback settings. See `docs/cerbanimo-platform-requirements.md` for the platform-side work.
 

@@ -1,14 +1,40 @@
 import type {
   ActionExecutionRecord,
   ActionPreview,
+  AutomationRun,
+  AutomationRunResult,
   CerbanimoTask,
   PlanningDraft,
   ProjectBootstrapActionDetail,
-  ResponseCard
+  ResponseCard,
+  TaskAutomationContext
 } from "../../shared/types";
 import { agentModes } from "./modeService";
 
 export function actionPreviewCard(action: ActionPreview): ResponseCard {
+  if (action.kind !== "create_project") {
+    const durableActionId = action.cerbanimoActionUuid ?? action.cerbanimoActionId;
+    const actionId = durableActionId ?? action.id;
+    return {
+      id: `card-${action.id}`,
+      kind: "action_preview",
+      title: action.title,
+      subtitle: `${action.risk.toUpperCase()} risk${action.destructive ? " destructive" : ""}`,
+      body: action.summary,
+      metadata: {
+        status: action.cerbanimoActionId ? "previewed in Cerbanimo" : "local preview",
+        permissions: action.requiredPermissions,
+        confirmationStatus: "awaiting explicit confirmation",
+        actionId,
+        createdAt: action.createdAt
+      },
+      actions: [
+        { id: "confirm", label: "Confirm action", style: "primary", actionId },
+        { id: "cancel", label: "Cancel action", style: "secondary", command: durableActionId ? `cancel action ${actionId}` : "cancel", actionId }
+      ]
+    };
+  }
+
   const tags = Array.isArray(action.payload.tags) ? action.payload.tags.map(String) : [];
   const dueDate = action.payload.dueDate ?? action.payload.due_date;
   const projectName = String(action.payload.name ?? action.title.replace(/^Create project:\s*/i, ""));
@@ -168,6 +194,15 @@ export function projectResultCards(detail: ProjectBootstrapActionDetail): Respon
 export function activeTaskCard(tasks: CerbanimoTask[]): ResponseCard {
   const counts = classificationCounts(tasks);
   const assistedTask = tasks.find((task) => task.automation?.classification === "assisted_automation");
+  const qualityTask = tasks.find((task) => (task.automation?.requirements?.capabilities ?? []).includes("github.run_quality_checks"));
+  const actions = [
+    ...(assistedTask
+      ? [{ id: "prepare-assisted-task", label: "Prepare with Kamiya", style: "secondary" as const, command: `prepare task automation ${assistedTask.id}` }]
+      : []),
+    ...(qualityTask
+      ? [{ id: "review-quality-checks", label: "Review quality checks", style: "primary" as const, command: `review quality checks ${qualityTask.id}` }]
+      : [])
+  ];
   return {
     id: crypto.randomUUID(),
     kind: "task",
@@ -202,9 +237,7 @@ export function activeTaskCard(tasks: CerbanimoTask[]): ResponseCard {
         dependencies: dependencySummary(task.dependencies)
       }
     })),
-    actions: assistedTask
-      ? [{ id: "view-required-inputs", label: "View required inputs", style: "secondary", command: `view required inputs ${assistedTask.id}` }]
-      : undefined
+    actions: actions.length ? actions : undefined
   };
 }
 
@@ -217,9 +250,9 @@ export function assistedTaskInputsCard(tasks: CerbanimoTask[], taskId?: string):
     id: crypto.randomUUID(),
     kind: "task",
     title: task ? `Required inputs: ${String(task.name ?? "Assisted task")}` : "Required inputs",
-    subtitle: "Read-only assisted automation preparation",
+    subtitle: "Assisted automation preparation",
     body: task
-      ? "Kamiya can help prepare this task after these inputs and permissions are supplied. Execution is not enabled in this release."
+      ? "Kamiya can save these inputs as a Cerbanimo preparation. Execution becomes available only when Cerbanimo has a registered capability and configured executor."
       : "Cerbanimo did not return an assisted task with input requirements.",
     metadata: {
       classification: task ? automationLabel(task) : "Human task",
@@ -237,6 +270,87 @@ export function assistedTaskInputsCard(tasks: CerbanimoTask[], taskId?: string):
         inputType: input.inputType,
         sensitive: input.sensitive ? "yes" : "no"
       }
+    })),
+    actions: task ? [{ id: "prepare-assisted-task", label: "Prepare with Kamiya", style: "secondary", command: `prepare task automation ${task.id}` }] : undefined
+  };
+}
+
+export function taskAutomationPreparationCard(context: TaskAutomationContext): ResponseCard {
+  const task = context.task;
+  const preparation = context.preparation;
+  const validationErrors = new Map((context.validation?.errors ?? []).map((error) => [error.key, error]));
+  const capabilityReasons = context.capability.reasons.length ? context.capability.reasons.join(", ") : "ready";
+  const preparationId = preparation?.id;
+  const taskId = String(task.id);
+  const isQualityCheck = (context.capability.requiredCapabilities ?? []).includes("github.run_quality_checks")
+    || (context.automation.requirements.capabilities ?? []).includes("github.run_quality_checks");
+
+  return {
+    id: `task-automation-${taskId}-${preparationId ?? "context"}`,
+    kind: "automation",
+    title: `Task automation: ${String(task.name ?? task.title ?? taskId)}`,
+    subtitle: preparation ? `Preparation ${preparation.status}` : automationLabel(task),
+    body: context.capability.executionAvailable
+      ? "Cerbanimo has the required inputs, actor scope, and executor capability for this task automation."
+      : "Cerbanimo is holding this as preparation until the required inputs, actor scope, policy, and executor capability all pass.",
+    metadata: {
+      taskId,
+      classification: automationLabel(task),
+      capability: (context.capability.requiredCapabilities ?? []).join(", ") || capabilitySummary(task),
+      executor: context.capability.executor ?? "not configured",
+      executionAvailable: context.capability.executionAvailable ? "yes" : "no",
+      reasons: capabilityReasons,
+      preparationId: preparationId ? String(preparationId) : ""
+    },
+    items: context.inputSchema.map((field) => {
+      const error = validationErrors.get(field.key);
+      return {
+        id: field.key,
+        title: field.label,
+        subtitle: field.description || field.inputType,
+        status: error ? String(error.code ?? "missing") : field.required ? "ready" : "optional",
+        metadata: {
+          key: field.key,
+          inputType: field.inputType,
+          sensitive: field.sensitive ? "yes" : "no"
+        }
+      };
+    }),
+    actions: [
+      ...(isQualityCheck
+        ? [{ id: "review-quality-checks", label: "Review quality checks", style: "primary" as const, command: `review quality checks ${taskId}` }]
+        : []),
+      ...(preparationId
+        ? [{ id: "refresh-task-automation", label: "Refresh", style: "secondary" as const, command: `prepare task automation ${taskId}` }]
+        : [])
+    ]
+  };
+}
+
+export function automationRunResultCard(run: AutomationRun): ResponseCard {
+  const result = normalizeAutomationRunResult(run.result);
+  const checks = Array.isArray(result.checks) ? result.checks : [];
+
+  return {
+    id: `automation-run-${run.run_uuid ?? run.id}`,
+    kind: "validation_report",
+    title: result.status === "checks_passed" ? "Quality checks passed" : result.status === "checks_failed" ? "Quality checks failed" : "Automation run result",
+    subtitle: String(run.status ?? "completed"),
+    body: result.summary ?? result.message ?? "Cerbanimo returned an automation run report.",
+    metadata: {
+      runId: String(run.run_uuid ?? run.id),
+      taskId: result.taskId ? String(result.taskId) : "",
+      repository: result.repository ?? "",
+      ref: result.ref ?? "",
+      executor: result.executor ?? "",
+      submittedTask: result.submittedTask ? "yes" : "no",
+      artifact: result.artifactUri ?? ""
+    },
+    items: checks.map((check) => ({
+      id: String(check.key ?? crypto.randomUUID()),
+      title: String(check.key ?? "Check"),
+      subtitle: String(check.message ?? ""),
+      status: String(check.status ?? "unknown")
     }))
   };
 }
@@ -525,6 +639,13 @@ function normalizeError(error: unknown): { code?: string | number; message?: str
     };
   }
   return { message: typeof error === "string" ? error : undefined };
+}
+
+function normalizeAutomationRunResult(result: AutomationRun["result"]): AutomationRunResult {
+  if (result && typeof result === "object" && !Array.isArray(result)) {
+    return result as AutomationRunResult;
+  }
+  return { status: "completed" };
 }
 
 function dependencySummary(value: unknown): string {

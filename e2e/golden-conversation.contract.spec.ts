@@ -86,13 +86,22 @@ test.describe("golden conversation contract", () => {
       await expect(page.getByText("github.run_quality_checks").first()).toBeVisible();
       await expect(page.getByText("quality-check-report").first()).toBeVisible();
       await expect(page.getByRole("button", { name: /^Automate$/i })).toHaveCount(0);
+      await expect(page.getByRole("button", { name: "Prepare with Kamiya" })).toBeVisible();
+      await expect(page.getByRole("button", { name: "Review quality checks" })).toBeVisible();
       await expect(page.getByRole("button", { name: "Open created project" })).toBeVisible();
       await page.getByRole("button", { name: "Explore active tasks" }).click();
       await expect(page.getByText("Here are the active tasks Cerbanimo says can begin now.")).toBeVisible();
       await expect(page.getByText("Needs 4 inputs: Repository, Target branch, Acceptance criteria, ...").first()).toBeVisible();
-      await page.getByRole("button", { name: "View required inputs" }).first().click();
-      await expect(page.getByText("Execution is not enabled in this release.").first()).toBeVisible();
+      await page.getByRole("button", { name: "Prepare with Kamiya" }).first().click();
+      await expect(page.getByRole("heading", { name: "Task automation: Prototype constitution voting" })).toBeVisible();
+      await expect(page.getByText("CAPABILITY_NOT_REGISTERED").first()).toBeVisible();
       await expect(page.getByText("Approval before external effects.").first()).toBeVisible();
+      await page.getByRole("button", { name: "Review quality checks" }).first().click();
+      await expect(page.getByText("quality-check action preview").first()).toBeVisible();
+      await expect(page.getByRole("heading", { name: /Run quality checks/i })).toBeVisible();
+      await page.getByRole("button", { name: "Confirm action" }).first().click();
+      await expect(page.getByRole("heading", { name: "Quality checks passed" })).toBeVisible();
+      await expect(page.getByText("Build passed.").first()).toBeVisible();
       await page.screenshot({ path: path.join(screenshotDir, "05-completed-project.png") });
 
       await page.reload();
@@ -101,8 +110,8 @@ test.describe("golden conversation contract", () => {
       await expect(page.getByText("Automation-ready classification").first()).toBeVisible();
 
       const state = await fixtureState(request);
-      expect(state.actions).toBe(1);
-      expect(state.confirms).toBe(1);
+      expect(state.actions).toBe(2);
+      expect(state.confirms).toBe(2);
       expect(state.projects).toBe(1);
     });
 

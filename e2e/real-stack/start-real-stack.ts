@@ -216,6 +216,8 @@ async function seedActors(hashApiToken: (token: string) => string) {
     "tasks:write",
     "actions:read",
     "actions:write",
+    "automation:read",
+    "automation:write",
     "ai:route",
     "capabilities:read"
   ];
@@ -271,6 +273,7 @@ function startProcesses(): void {
       GEMINI_API_KEY: "disabled-for-e2e",
       CERBANIMO_E2E_MODE: "true",
       CERBANIMO_PROJECT_BOOTSTRAP_PROVIDER: "deterministic",
+      CERBANIMO_QUALITY_CHECK_EXECUTOR: "deterministic",
       CERBANIMO_E2E_PROVIDER_CONTROL_DIR: controlDir
     }
   });
@@ -285,6 +288,8 @@ function startProcesses(): void {
       KAMIYA_CERBANIMO_TIMEOUT_MS: "10000",
       KAMIYA_REAL_STACK_E2E: "1",
       KAMIYA_E2E_NOW: "2026-07-02T12:00:00.000-04:00",
+      KAMIYA_DEFAULT_QUALITY_CHECK_REPOSITORY: "glaedn/Kamiya",
+      KAMIYA_DEFAULT_QUALITY_CHECK_REF: "main",
       KAMIYA_GEMINI_API_KEY: "",
       GEMINI_API_KEY: ""
     }

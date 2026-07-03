@@ -13,6 +13,7 @@ interface FixtureAction {
   preview_payload: Record<string, unknown>;
   execution_result: unknown;
   related_project_id: number | null;
+  related_automation_run_id?: number | null;
   created_at: string;
   confirmed_at?: string;
   pollCount: number;
@@ -20,7 +21,10 @@ interface FixtureAction {
 }
 
 const actions = new Map<string, FixtureAction>();
+const automationRuns = new Map<string, Record<string, unknown>>();
 let nextActionId = 1;
+let nextPreparationId = 1;
+let nextRunId = 1;
 const savedChats: unknown[] = [];
 
 const app = express();
@@ -59,10 +63,22 @@ app.post("/api/v1/actions/:id/confirm", (req, res) => {
   }
   action.status = "confirmed";
   action.confirmed_at = new Date("2026-07-02T12:00:05.000Z").toISOString();
-  action.execution_result = {
-    status: "queued",
-    message: "Project bootstrap action confirmed and queued for worker execution."
-  };
+  if (action.intent_json?.functionName === "tasks.run_automation") {
+    const runId = nextRunId++;
+    const preparationId = Number((action.intent_json?.arguments as Record<string, unknown> | undefined)?.preparationId ?? 1);
+    action.related_automation_run_id = runId;
+    action.execution_result = {
+      status: "queued",
+      message: "Automation action confirmed and queued for worker execution.",
+      automationRunId: runId
+    };
+    automationRuns.set(String(runId), automationRun(runId, preparationId));
+  } else {
+    action.execution_result = {
+      status: "queued",
+      message: "Project bootstrap action confirmed and queued for worker execution."
+    };
+  }
   res.status(202).json(envelope(action, "fixture-confirm"));
 });
 
@@ -76,6 +92,114 @@ app.get("/api/v1/actions/:id", (req, res) => {
 app.get("/api/v1/actions", (_req, res) => {
   const unique = [...new Map([...actions.values()].map((action) => [action.id, action])).values()];
   res.json(envelope({ actions: unique }, "fixture-list"));
+});
+
+app.get("/api/v1/tasks/:taskId/automation", (req, res) => {
+  const task = allTasks().find((item) => String(item.id) === String(req.params.taskId));
+  if (!task) return res.status(404).json(errorEnvelope("TASK_NOT_FOUND", "Task not found"));
+  const inputSchema = inputSchemaForTask(task);
+  res.json(envelope({
+    task,
+    automation: task.automation,
+    inputSchema,
+    preparation: null,
+    validation: {
+      valid: false,
+      errors: inputSchema.filter((field) => field.required).map((field) => ({ key: field.key, code: "REQUIRED", message: `${field.label} is required.` })),
+      findings: []
+    },
+    capability: fixtureCapability(task, false),
+    policies: { modifyingActionsRequirePreview: true, rawSecretsAccepted: false }
+  }, "fixture-task-automation"));
+});
+
+app.post("/api/v1/tasks/:taskId/automation/preparations", (req, res) => {
+  const task = allTasks().find((item) => String(item.id) === String(req.params.taskId));
+  if (!task) return res.status(404).json(errorEnvelope("TASK_NOT_FOUND", "Task not found"));
+  const inputSchema = inputSchemaForTask(task);
+  const inputValues = req.body?.inputValues ?? {};
+  const capabilityName = req.body?.capabilityName ?? firstCapability(task) ?? null;
+  const valid = Boolean(inputValues.repository && inputValues.ref && inputValues.checkProfile && inputValues.approval);
+  const preparationId = nextPreparationId++;
+  const preparation = {
+    id: preparationId,
+    preparation_uuid: `fixture-prep-${preparationId}`,
+    task_id: task.id,
+    actor_user_id: 1,
+    capability_name: capabilityName,
+    status: valid ? "ready" : "draft",
+    input_schema_snapshot: inputSchema,
+    input_values: inputValues,
+    validation_result: { valid, errors: valid ? [] : [{ key: "repository", code: "REQUIRED", message: "Repository is required." }], findings: [] },
+    capability_snapshot: fixtureCapability(task, valid),
+    created_at: new Date("2026-07-02T12:00:06.000Z").toISOString(),
+    updated_at: new Date("2026-07-02T12:00:06.000Z").toISOString()
+  };
+  res.status(201).json(envelope({
+    task,
+    automation: task.automation,
+    inputSchema,
+    preparation,
+    validation: preparation.validation_result,
+    capability: preparation.capability_snapshot
+  }, "fixture-preparation"));
+});
+
+app.post("/api/v1/tasks/:taskId/automation/preparations/:preparationId/preview", (req, res) => {
+  const task = allTasks().find((item) => String(item.id) === String(req.params.taskId));
+  if (!task) return res.status(404).json(errorEnvelope("TASK_NOT_FOUND", "Task not found"));
+  const id = nextActionId++;
+  const preparationId = Number(req.params.preparationId);
+  const action: FixtureAction = {
+    id,
+    action_uuid: `e2e-automation-action-${id}`,
+    status: "previewed",
+    risk_level: "normal",
+    intent_json: {
+      functionName: "tasks.run_automation",
+      arguments: {
+        taskId: task.id,
+        preparationId,
+        capabilityName: "github.run_quality_checks"
+      },
+      automation: {
+        templateKey: "run_quality_checks",
+        input: {
+          taskId: task.id,
+          preparationId,
+          capabilityName: "github.run_quality_checks"
+        }
+      }
+    },
+    preview_payload: {
+      title: `Run quality checks for ${task.name}`,
+      summary: "Cerbanimo will run deterministic quality checks and attach the report.",
+      confirmationRequired: true
+    },
+    execution_result: null,
+    related_project_id: 100,
+    created_at: new Date("2026-07-02T12:00:07.000Z").toISOString(),
+    pollCount: 0,
+    confirmCount: 0
+  };
+  actions.set(String(id), action);
+  actions.set(action.action_uuid, action);
+  res.status(201).json(envelope({
+    task,
+    automation: task.automation,
+    inputSchema: inputSchemaForTask(task),
+    preparation: { id: preparationId, status: "previewed", capability_name: "github.run_quality_checks" },
+    validation: { valid: true, errors: [], findings: [] },
+    capability: fixtureCapability(task, true),
+    action,
+    template: { key: "run_quality_checks", name: "Run Quality Checks", status: "available" }
+  }, "fixture-automation-preview"));
+});
+
+app.get("/api/v1/automation/runs/:id", (req, res) => {
+  const run = automationRuns.get(req.params.id);
+  if (!run) return res.status(404).json(errorEnvelope("RUN_NOT_FOUND", "Automation run not found"));
+  res.json(envelope(run, "fixture-run"));
 });
 
 app.get("/kamiya/chats", (_req, res) => {
@@ -123,8 +247,11 @@ app.get("/__fixture/state", (_req, res) => {
 
 app.post("/__fixture/reset", (_req, res) => {
   actions.clear();
+  automationRuns.clear();
   savedChats.length = 0;
   nextActionId = 1;
+  nextPreparationId = 1;
+  nextRunId = 1;
   res.json({ ok: true });
 });
 
@@ -138,6 +265,8 @@ process.env.KAMIYA_ALLOWED_ORIGIN = `http://127.0.0.1:${kamiyaPort}`;
 process.env.KAMIYA_GEMINI_API_KEY = "";
 process.env.KAMIYA_CERBANIMO_TIMEOUT_MS = "5000";
 process.env.KAMIYA_E2E_NOW = "2026-07-02T12:00:00.000-04:00";
+process.env.KAMIYA_DEFAULT_QUALITY_CHECK_REPOSITORY = "glaedn/Kamiya";
+process.env.KAMIYA_DEFAULT_QUALITY_CHECK_REF = "main";
 
 await import("../../server/index");
 
@@ -293,6 +422,79 @@ function fullyAutomatableAutomation() {
     source: "generated",
     version: "task-automation-v1",
     findings: []
+  };
+}
+
+function inputSchemaForTask(task: ReturnType<typeof allTasks>[number]) {
+  if (capabilitiesFor(task).includes("github.run_quality_checks")) return qualityCheckInputSchema();
+  return task.automation.requiredHumanInputs;
+}
+
+function capabilitiesFor(task: ReturnType<typeof allTasks>[number]): string[] {
+  const value = (task.automation.requirements as { capabilities?: string[] }).capabilities;
+  return Array.isArray(value) ? value : [];
+}
+
+function firstCapability(task: ReturnType<typeof allTasks>[number]): string | undefined {
+  return capabilitiesFor(task)[0];
+}
+
+function qualityCheckInputSchema() {
+  return [
+    { key: "repository", label: "Repository", description: "Repository to check.", inputType: "repository", required: true, sensitive: false },
+    { key: "ref", label: "Ref", description: "Branch, tag, or commit SHA.", inputType: "text", required: true, sensitive: false },
+    { key: "checkProfile", label: "Check profile", description: "Quality-check profile.", inputType: "choice", required: true, sensitive: false, options: [{ value: "node_standard", label: "Node standard" }] },
+    { key: "approval", label: "Quality-check approval", description: "Approval to run repository code.", inputType: "approval", required: true, sensitive: false }
+  ];
+}
+
+function fixtureCapability(task: ReturnType<typeof allTasks>[number], ready: boolean) {
+  const capabilityName = firstCapability(task) ?? null;
+  const executable = capabilityName === "github.run_quality_checks" && ready;
+  return {
+    classification: task.automation.classification,
+    requiredCapabilities: capabilityName ? [capabilityName] : [],
+    availableCapabilities: executable ? [capabilityName] : [],
+    missingCapabilities: executable || !capabilityName ? [] : [capabilityName],
+    actorAuthorized: true,
+    executionAvailable: executable,
+    templateKey: executable ? "run_quality_checks" : null,
+    executor: executable ? "deterministic" : null,
+    reasons: executable ? [] : capabilityName === "github.run_quality_checks" ? ["INPUTS_INCOMPLETE"] : ["CAPABILITY_NOT_REGISTERED"]
+  };
+}
+
+function automationRun(runId: number, preparationId: number) {
+  return {
+    id: runId,
+    run_uuid: `fixture-run-${runId}`,
+    action_id: nextActionId - 1,
+    preparation_id: preparationId,
+    template_key: "run_quality_checks",
+    status: "completed",
+    input: { taskId: 203, preparationId, capabilityName: "github.run_quality_checks" },
+    result: {
+      status: "checks_passed",
+      reportType: "quality_check",
+      taskId: 203,
+      taskName: "Run baseline repository quality checks",
+      repository: "glaedn/Kamiya",
+      ref: "main",
+      checkProfile: "node_standard",
+      executor: "deterministic",
+      summary: "Quality checks passed. Cerbanimo attached this report and submitted the task for review.",
+      artifactUri: `cerbanimo://automation-runs/fixture-run-${runId}/quality-check-report`,
+      submittedTask: true,
+      checks: [
+        { key: "dependency_install", status: "passed", message: "Dependencies installed." },
+        { key: "typecheck", status: "passed", message: "Type check passed." },
+        { key: "lint", status: "passed", message: "Lint passed." },
+        { key: "unit_tests", status: "passed", message: "Unit tests passed." },
+        { key: "build", status: "passed", message: "Build passed." }
+      ],
+      completedAt: "2026-07-02T12:00:09.000Z"
+    },
+    logs: [{ level: "info", message: "Automation run queued after action confirmation.", payload: {}, created_at: "2026-07-02T12:00:08.000Z" }]
   };
 }
 

@@ -105,6 +105,57 @@ export async function expectSuccessfulBootstrap(runId: string): Promise<Database
   return report;
 }
 
+export async function expectQualityCheckAutomation(projectId?: number): Promise<Record<string, unknown>> {
+  expect(projectId).toBeTruthy();
+  return withClient(async (client) => {
+    const result = await client.query(
+      `SELECT
+         r.id AS run_id,
+         r.run_uuid,
+         r.status AS run_status,
+         r.result,
+         p.id AS preparation_id,
+         p.status AS preparation_status,
+         p.capability_name,
+         a.id AS action_id,
+         a.status AS action_status,
+         t.id AS task_id,
+         t.name AS task_name,
+         t.status AS task_status,
+         t.submitted,
+         t.proof_of_work_links,
+         t.reflection
+       FROM automation_runs r
+       JOIN task_automation_preparations p ON p.id = r.preparation_id
+       JOIN tasks t ON t.id = p.task_id
+       LEFT JOIN api_actions a ON a.id = r.action_id
+       WHERE t.project_id = $1
+         AND r.template_key = 'run_quality_checks'
+       ORDER BY r.id DESC
+       LIMIT 1`,
+      [projectId]
+    );
+    const row = result.rows[0];
+    expect(row, "quality-check automation run").toBeTruthy();
+    expect(row.run_status).toBe("completed");
+    expect(row.result?.status).toBe("checks_passed");
+    expect(row.preparation_status).toBe("consumed");
+    expect(row.capability_name).toBe("github.run_quality_checks");
+    expect(row.action_status).toBe("executed");
+    expect(row.task_status).toBe("submitted");
+    expect(row.submitted).toBe(true);
+    expect((row.proof_of_work_links ?? []).join(" ")).toContain("quality-check-report");
+    expect(String(row.reflection ?? "")).toContain("Automated quality-check report");
+    return {
+      runId: row.run_id,
+      runUuid: row.run_uuid,
+      taskId: row.task_id,
+      taskName: row.task_name,
+      status: row.result?.status
+    };
+  });
+}
+
 export async function expectRetryThenSuccess(runId: string): Promise<DatabaseReport> {
   const report = await expectSuccessfulBootstrap(runId);
   expect(report.attemptCount ?? 0).toBeGreaterThanOrEqual(2);

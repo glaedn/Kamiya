@@ -1,6 +1,6 @@
-# Task Automation Classification
+# Task Automation Classification And Preparation
 
-Packet 004 adds durable task automation eligibility metadata owned by Cerbanimo and rendered by Kamiya.
+Packets 004-006 add durable task automation eligibility metadata, actor-owned preparations, and the first executable quality-check automation. Cerbanimo owns the policy, storage, execution, and audit trail. Kamiya renders the state and routes user confirmation.
 
 ## Canonical Values
 
@@ -76,6 +76,18 @@ Canonical `/api/v1` task payloads expose:
 
 `GET /api/v1/actions/:id` includes the same `automation` object on `tasks` and `activeTasks`.
 
+Task automation preparation uses these Cerbanimo APIs:
+
+- `GET /api/v1/tasks/:taskId/automation`
+- `POST /api/v1/tasks/:taskId/automation/preparations`
+- `PATCH /api/v1/tasks/:taskId/automation/preparations/:preparationId`
+- `POST /api/v1/tasks/:taskId/automation/preparations/:preparationId/validate`
+- `POST /api/v1/tasks/:taskId/automation/preparations/:preparationId/preview`
+- `POST /api/v1/tasks/:taskId/automation/preparations/:preparationId/cancel`
+- `GET /api/v1/automation/runs/:id`
+
+Preparation statuses are `draft`, `invalid`, `ready`, `previewed`, `consumed`, and `cancelled`. Modifying work still flows through action preview, user confirmation, `automation_runs`, and `automation_logs`.
+
 ## Kamiya Rendering
 
 Kamiya parses the canonical automation object with safe fallback. Missing or malformed metadata renders as:
@@ -87,7 +99,9 @@ This task predates automation classification and defaults to human execution.
 
 Task cards display the classification label, explanation, required inputs, capability requirements, expected artifacts, validation summary, skill, reward, due date, and dependencies.
 
-Kamiya may show `View required inputs` for assisted tasks. It does not render an enabled `Automate` button in Packet 004. Fully automatable tasks say that execution capability is not connected yet.
+Kamiya shows `Prepare with Kamiya` for assisted tasks and `Review quality checks` for tasks requiring `github.run_quality_checks`. Assisted preparation can be saved without execution when Cerbanimo reports `CAPABILITY_NOT_REGISTERED`, `EXECUTOR_NOT_CONFIGURED`, `ACTOR_SCOPE_MISSING`, `INPUTS_INCOMPLETE`, `TASK_POLICY_BLOCKED`, or `PRODUCTION_SANDBOX_REQUIRED`.
+
+Quality-check execution is confirmation gated. On `checks_passed`, Cerbanimo attaches the report URI and moves the task to `submitted`. It does not award rewards, approve completion, merge code, push code, or deploy anything.
 
 ## Deterministic Golden Mix
 
@@ -101,11 +115,11 @@ Browser and database verification assert the 1/1/1 classification mix, assisted 
 
 ## Known Limitations
 
-- Assisted input collection is read-only.
-- Task automation execution is not implemented.
-- Capability availability and authorization are not resolved per task.
-- Validation workers do not yet evaluate task artifacts.
+- The only executable task capability is guarded `github.run_quality_checks`.
+- Production quality checks remain unavailable until a real sandbox executor is configured.
+- Assisted pull-request generation remains preparation-only.
+- Validation workers do not yet evaluate arbitrary task artifacts.
 
 ## Next Packet
 
-Packet 005 should implement Assisted Automation Input Contracts and Preparation Flow. It should turn `required_human_inputs` into a secure form and produce a reviewable action preview without executing arbitrary work.
+Next packets should replace the default quality-check repository convenience with full form editing, add a production sandbox executor, and expand capability implementations beyond quality checks.

@@ -224,6 +224,8 @@ export interface CerbanimoAction {
   preview_payload?: Record<string, unknown> | null;
   execution_result?: unknown;
   related_project_id?: number | null;
+  related_task_id?: number | null;
+  related_automation_run_id?: number | string | null;
   created_at?: string | null;
   confirmed_at?: string | null;
   executed_at?: string | null;
@@ -295,6 +297,86 @@ export interface CerbanimoTask {
   resolvedDependencies?: Array<number | string>;
   automation?: TaskAutomationMetadata;
   [key: string]: unknown;
+}
+
+export interface TaskAutomationValidationResult {
+  valid: boolean;
+  errors: Array<{ key?: string; code?: string; message?: string }>;
+  findings?: Array<{ key?: string; code?: string; message?: string }>;
+  sanitizedValues?: Record<string, unknown>;
+}
+
+export interface TaskAutomationCapabilityState {
+  classification?: TaskAutomationClassification | string;
+  requiredCapabilities: string[];
+  availableCapabilities: string[];
+  missingCapabilities: string[];
+  actorAuthorized: boolean;
+  executionAvailable: boolean;
+  templateKey?: string | null;
+  executor?: string | null;
+  reasons: string[];
+}
+
+export interface TaskAutomationPreparation {
+  id: number | string;
+  preparation_uuid?: string | null;
+  task_id?: number | string;
+  actor_user_id?: number | string;
+  capability_name?: string | null;
+  status: "draft" | "invalid" | "ready" | "previewed" | "consumed" | "cancelled" | string;
+  input_schema_snapshot?: TaskAutomationInput[];
+  input_values?: Record<string, unknown>;
+  validation_result?: TaskAutomationValidationResult | null;
+  capability_snapshot?: TaskAutomationCapabilityState | null;
+  preview_action_id?: number | string | null;
+  created_at?: string | null;
+  updated_at?: string | null;
+}
+
+export interface TaskAutomationContext {
+  task: CerbanimoTask;
+  automation: TaskAutomationMetadata;
+  inputSchema: TaskAutomationInput[];
+  preparation?: TaskAutomationPreparation | null;
+  validation?: TaskAutomationValidationResult | null;
+  capability: TaskAutomationCapabilityState;
+  policies?: Record<string, unknown>;
+  action?: CerbanimoAction;
+  template?: Record<string, unknown>;
+}
+
+export interface AutomationRunResult {
+  status: "checks_passed" | "checks_failed" | "blocked" | "cancelled" | "executor_failed" | "completed" | string;
+  reportType?: string;
+  taskId?: number | string;
+  taskName?: string;
+  repository?: string;
+  ref?: string;
+  checkProfile?: string;
+  executor?: string;
+  summary?: string;
+  artifactUri?: string;
+  submittedTask?: boolean;
+  checks?: Array<{ key?: string; status?: string; message?: string }>;
+  completedAt?: string;
+  reason?: string;
+  message?: string;
+}
+
+export interface AutomationRun {
+  id: number | string;
+  run_uuid?: string | null;
+  action_id?: number | string | null;
+  preparation_id?: number | string | null;
+  template_key?: string;
+  status: string;
+  input?: Record<string, unknown>;
+  result?: AutomationRunResult | Record<string, unknown> | null;
+  logs?: Array<{ level?: string; message?: string; payload?: unknown; created_at?: string | null }>;
+  created_at?: string | null;
+  started_at?: string | null;
+  completed_at?: string | null;
 }
 
 export interface ProjectBootstrapActionDetail {

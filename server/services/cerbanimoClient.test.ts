@@ -130,6 +130,58 @@ describe("CerbanimoClient /api/v1 action contract", () => {
     expect(fetchMock.mock.calls[1][0]).toContain("/api/v1/actions/42/cancel");
   });
 
+  it("previews prepared task automation through the task automation API", async () => {
+    const fetchMock = mockFetch({
+      ok: true,
+      data: taskAutomationContext({ action: actionRow({ id: 77, action_uuid: "automation-action-77", status: "previewed" }) }),
+      requestId: "req-automation-preview"
+    }, 201);
+
+    const result = await new CerbanimoClient(auth).previewTaskAutomationPreparation(203, 5);
+
+    expect(result.ok).toBe(true);
+    expect(result.data?.action?.id).toBe(77);
+    expect(result.data?.capability.executionAvailable).toBe(true);
+    expect(fetchMock.mock.calls[0][0]).toBe("http://localhost:4000/api/v1/tasks/203/automation/preparations/5/preview");
+  });
+
+  it("confirms prepared task automation and hydrates the automation run", async () => {
+    const fetchMock = vi
+      .fn()
+      .mockResolvedValueOnce(jsonResponse({
+        ok: true,
+        data: actionRow({ id: 77, action_uuid: "automation-action-77", status: "confirmed", related_automation_run_id: 88 }),
+        error: null,
+        requestId: "req-confirm-automation"
+      }, 202))
+      .mockResolvedValueOnce(jsonResponse({
+        ok: true,
+        data: automationRunRow(),
+        error: null,
+        requestId: "req-run"
+      }));
+    vi.stubGlobal("fetch", fetchMock);
+
+    const result = await new CerbanimoClient(auth).executeAction({
+      id: "local-automation-preview",
+      kind: "run_automation",
+      title: "Run quality checks",
+      summary: "Run checks after confirmation.",
+      risk: "medium",
+      destructive: false,
+      payload: { taskId: 203, preparationId: 5 },
+      requiredPermissions: ["automation:write"],
+      createdAt: "2026-07-02T12:00:00.000Z",
+      cerbanimoActionId: "77",
+      cerbanimoActionUuid: "automation-action-77"
+    });
+
+    expect(result.ok).toBe(true);
+    expect((result.data as { automationRun?: { result?: { status?: string } } }).automationRun?.result?.status).toBe("checks_passed");
+    expect(fetchMock.mock.calls[0][0]).toContain("/api/v1/actions/automation-action-77/confirm");
+    expect(fetchMock.mock.calls[1][0]).toContain("/api/v1/automation/runs/88");
+  });
+
   it("formats object-shaped Cerbanimo errors without [object Object]", async () => {
     mockFetch({
       ok: false,
@@ -254,6 +306,65 @@ function actionDetail({
     terminal: workflowStatus === "completed",
     result: null,
     error: null
+  };
+}
+
+function taskAutomationContext(overrides: Record<string, unknown> = {}) {
+  return {
+    task: {
+      id: 203,
+      name: "Run baseline repository quality checks",
+      status: "active-unassigned",
+      automation: {
+        classification: "fully_automatable",
+        requiredHumanInputs: [],
+        requirements: { capabilities: ["github.run_quality_checks"], expectedArtifacts: ["quality-check-report"] },
+        validationRequirements: [],
+        source: "generated"
+      }
+    },
+    automation: {
+      classification: "fully_automatable",
+      requiredHumanInputs: [],
+      requirements: { capabilities: ["github.run_quality_checks"], expectedArtifacts: ["quality-check-report"] },
+      validationRequirements: [],
+      source: "generated"
+    },
+    inputSchema: [
+      { key: "repository", label: "Repository", inputType: "repository", required: true, sensitive: false },
+      { key: "ref", label: "Ref", inputType: "text", required: true, sensitive: false },
+      { key: "checkProfile", label: "Check profile", inputType: "choice", required: true, sensitive: false },
+      { key: "approval", label: "Approval", inputType: "approval", required: true, sensitive: false }
+    ],
+    preparation: { id: 5, status: "previewed", capability_name: "github.run_quality_checks" },
+    validation: { valid: true, errors: [], findings: [] },
+    capability: {
+      requiredCapabilities: ["github.run_quality_checks"],
+      availableCapabilities: ["github.run_quality_checks"],
+      missingCapabilities: [],
+      actorAuthorized: true,
+      executionAvailable: true,
+      templateKey: "run_quality_checks",
+      executor: "deterministic",
+      reasons: []
+    },
+    ...overrides
+  };
+}
+
+function automationRunRow() {
+  return {
+    id: 88,
+    run_uuid: "automation-run-88",
+    status: "completed",
+    template_key: "run_quality_checks",
+    result: {
+      status: "checks_passed",
+      summary: "Quality checks passed.",
+      submittedTask: true,
+      checks: [{ key: "build", status: "passed", message: "Build passed." }]
+    },
+    logs: []
   };
 }
 

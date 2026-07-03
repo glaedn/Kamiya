@@ -193,3 +193,35 @@ Consequences: Cerbanimo stores and normalizes task classification before persist
 Repository evidence: Cerbanimo Packet 004 branch: `backend/services/TaskAutomationClassificationService.js`, `models/tasks.js`, `backend/services/ProjectBootstrapService.js`, `backend/routes/api_v1/index.js`; Kamiya Packet 004 branch: [server/services/cardFactory.ts](../../server/services/cardFactory.ts), [server/services/cerbanimoClient.ts](../../server/services/cerbanimoClient.ts), [docs/task-automation-classification.md](../task-automation-classification.md).
 
 Follow-up work: Packet 005 Assisted Automation Input Contracts and Preparation Flow.
+
+## ADR-013
+
+Date: 2026-07-03
+
+Decision: Assisted automation preparation is durable Cerbanimo state, not a Kamiya-only form.
+
+Status: accepted
+
+Rationale: Required task inputs, sanitized values, validation findings, capability resolution, and action previews must survive refresh, cross-client use, and future bot clients without trusting browser state.
+
+Consequences: Kamiya asks Cerbanimo for `/api/v1/tasks/:taskId/automation`, saves preparations through Cerbanimo, and executes only after Cerbanimo creates a durable `tasks.run_automation` preview and the user confirms it.
+
+Repository evidence: Cerbanimo Packet 005/006 branch: `models/kamiya_api.js`, `backend/services/TaskAutomationPreparationService.js`, `backend/services/TaskAutomationInputValidator.js`, `backend/routes/api_v1/index.js`; Kamiya Packet 005/006 branch: [server/services/cerbanimoClient.ts](../../server/services/cerbanimoClient.ts), [server/services/chatService.ts](../../server/services/chatService.ts), [docs/task-automation-preparation.md](../task-automation-preparation.md).
+
+Follow-up work: Replace command-style key/value entry with a full editable form panel.
+
+## ADR-014
+
+Date: 2026-07-03
+
+Decision: `github.run_quality_checks` is the first executable capability, but only through a guarded executor.
+
+Status: accepted
+
+Rationale: Quality checks are bounded, auditable, and useful, but executing repository code is unsafe without an explicit sandbox boundary.
+
+Consequences: E2E uses a deterministic executor under strict test/database lockouts. Production capability resolution fails closed with `PRODUCTION_SANDBOX_REQUIRED` until a real sandbox executor is configured.
+
+Repository evidence: Cerbanimo Packet 006 branch: `backend/services/AutomationWorkerService.js`, `backend/jobs/workers/automationWorker.js`, `backend/services/TaskAutomationCapabilityResolver.js`; Kamiya Packet 006 branch: [docs/run-quality-checks-automation.md](../run-quality-checks-automation.md), [e2e/real-stack/db.ts](../../e2e/real-stack/db.ts).
+
+Follow-up work: Implement a production sandbox provider and remove any temptation to run untrusted code in the API process.

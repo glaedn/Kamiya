@@ -52,39 +52,51 @@ Primary risk addressed: Classification is durable platform metadata and normaliz
 
 Proof of completion: Generated and manual tasks expose classification metadata; deterministic provider includes one task in each category; Kamiya renders distinct labels and required-input summaries without fake Automate controls; browser and DB verification assert the category mix.
 
-## Packet 005: Assisted Automation Input Contracts And Preparation Flow
+## Completed Baseline: Packet 005 Assisted Automation Input Contracts And Preparation Flow
 
-Goal: Turn `required_human_inputs` into a secure, schema-driven preparation flow that collects inputs and produces a reviewable automation action preview without executing arbitrary work.
+Status: complete for durable preparation records, server validation, capability truthfulness, and preview creation.
 
-User-visible outcome: For an assisted task, Cami can open the required-input summary, supply repository/branch/approval/context fields, and receive a safe preview of what Kamiya could prepare next.
+User-visible outcome: For an assisted task, Cami can open the required-input summary, see the required schema, save/validate preparation through Cerbanimo, and receive honest unavailable-capability reasons when no executor exists.
 
-Repository scope: Cerbanimo task input schema validation, action preview payloads for prepared automation, optional draft storage, and capability/authorization introspection; Kamiya read/write assisted-input form and preview cards.
+Repository scope completed: Cerbanimo task input schema validation, durable `task_automation_preparations`, action preview payloads for prepared automation, capability resolution, and Kamiya preparation cards.
 
 Dependencies: Packet 004 task automation metadata and existing `/api/v1/actions` preview/confirm contract.
 
-Primary risk: Treating user-supplied inputs as immediate permission to execute. Packet 005 should stop at a reviewable preview.
+Primary risk addressed: User-supplied inputs are not immediate permission to execute; preview and confirmation remain mandatory.
 
-Estimated size: L
+Proof of completion: Preparation APIs validate and snapshot schemas, raw sensitive values are rejected, unavailable capabilities are shown truthfully, and browser tests cover preparation display/resume behavior.
 
-Proof of completion: Assisted task inputs validate against Cerbanimo-provided schemas, sensitive values are represented only as secret references, previews are durable action records, no worker executes, and browser tests cover desktop/mobile form behavior.
+## Completed Baseline: Packet 006 `run_quality_checks` Worker
 
-## Packet 006: `run_quality_checks` Worker
+Status: complete for deterministic E2E execution and task submission mapping.
 
-Goal: Turn `run_quality_checks` into the first fully real bounded automation worker.
+User-visible outcome: Cami can review a quality-check action preview, confirm it, and receive a durable quality-check report. Passing checks submit the task for review.
 
-User-visible outcome: Cami can ask Kamiya to run quality checks and receive a clear pass/fail report with findings.
-
-Repository scope: Cerbanimo `backend/services/AutomationWorkerService.js`, `backend/jobs/workers/automationWorker.js`, automation tests; Kamiya automation cards.
+Repository scope completed: Cerbanimo `AutomationWorkerService`, `automationWorker`, `TaskAutomationCapabilityResolver`, `TaskAutomationPreparationService`, validation tests, and Kamiya automation cards/client polling.
 
 Dependencies: Persistent action queue.
 
-Primary risk: Repository/CI targets require external credentials and sandbox policy.
+Primary risk addressed: No arbitrary shell commands are accepted, and production execution fails closed without a sandbox.
 
-Estimated size: M
+Proof of completion: Real-stack integration verifies one action, one consumed preparation, one automation run, one report, and one submitted task; failure matrix covers retry, cancel, duplicate confirmation, auth failure, and cross-user denial.
 
-Proof of completion: Worker is idempotent, logs steps, supports project target and one repository target mode, and returns renderable result cards.
+## Packet 007: Production Sandbox And Automation Form UX
 
-## Packet 007: Auth0 Permission Introspection And Settings
+Goal: Add a production-safe quality-check executor and replace command-style preparation input with a full editable form/panel.
+
+User-visible outcome: Cami can enter/edit repository, ref, profile, and approval fields through a polished form; production quality checks remain disabled until the sandbox provider is configured.
+
+Repository scope: Cerbanimo executor provider interface and sandbox integration; Kamiya schema-driven form controls, progress polling cards, retry/cancel controls, and accessibility checks.
+
+Dependencies: Packet 005/006 preparation and run contracts.
+
+Primary risk: Repository code execution must not run in the API process.
+
+Estimated size: L
+
+Proof of completion: Production capability is available only with sandbox config, no arbitrary commands are accepted, and browser tests cover form validation, refresh recovery, checks failed, timeout/retry, cancel, and capability unavailable.
+
+## Packet 008: Auth0 Permission Introspection And Settings
 
 Goal: Formalize the permission contract between Kamiya and Cerbanimo beyond the working popup bridge.
 

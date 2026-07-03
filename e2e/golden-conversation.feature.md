@@ -55,16 +55,22 @@ Not implemented in Stage 2: assisted input submission, task automation execution
 
 Future-stage placeholders for automation execution, proof validation, rewards, dependency completion, and follow-on quests remain outside Golden Conversation v1.
 
-## Stage 3: Automated Task Execution
+## Stage 3: Task Automation Preparation And Quality Checks
 
-Status: not implemented.
+Status: implemented for schema-driven preparation display, capability truthfulness, durable action preview, confirmed deterministic quality-check execution, refresh recovery, failure states, and database invariant checks.
 
-Required platform/API dependencies:
+Covered by `golden-conversation.contract.spec.ts`, `golden-conversation.integration.spec.ts`, and `golden-conversation.failure.spec.ts`:
 
-- auditable automation action objects;
-- worker status and logs;
-- safe artifact return contracts;
-- permission checks per automation template.
+- assisted task cards expose `Prepare with Kamiya`;
+- quality-check tasks expose `Review quality checks`;
+- Cerbanimo preparation metadata and capability resolution hydrate through `/api/v1/tasks/:taskId/automation`;
+- unavailable assisted execution displays blocker reasons instead of fake controls;
+- `github.run_quality_checks` creates a `tasks.run_automation` preview and requires confirmation;
+- deterministic E2E execution creates one action, one automation run, one consumed preparation, logs, report, and one task submission;
+- passing checks submit the task for review but do not award rewards or mark completion;
+- queued/running quality-check runs recover from Cerbanimo state rather than relying on client state.
+
+Not implemented in Stage 3: production sandbox execution, arbitrary GitHub write actions, PR creation, deployment, proof validation by AI, rewards, or project completion recursion.
 
 ## Stage 4: Review And Scoring
 

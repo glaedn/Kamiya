@@ -2,7 +2,10 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 import { handleChatTurn } from "./chatService";
 
 describe("handleChatTurn", () => {
+  const originalEnv = { ...process.env };
+
   afterEach(() => {
+    process.env = { ...originalEnv };
     vi.unstubAllGlobals();
   });
 
@@ -208,6 +211,69 @@ describe("handleChatTurn", () => {
     expect(JSON.stringify(response.message.cards)).toContain("Human task");
     expect(JSON.stringify(response.message.cards)).not.toContain('"label":"Automate"');
   });
+
+  it("previews and confirms a prepared quality-check automation", async () => {
+    process.env.KAMIYA_DEFAULT_QUALITY_CHECK_REPOSITORY = "glaedn/Kamiya";
+    process.env.KAMIYA_DEFAULT_QUALITY_CHECK_REF = "main";
+    const fetchMock = vi
+      .fn()
+      .mockResolvedValueOnce(jsonResponse({
+        ok: true,
+        data: taskAutomationContext({ preparation: { id: 5, status: "ready", capability_name: "github.run_quality_checks" } }),
+        error: null,
+        requestId: "req-prep"
+      }, 201))
+      .mockResolvedValueOnce(jsonResponse({
+        ok: true,
+        data: taskAutomationContext({ action: automationActionRow({ id: 77, action_uuid: "automation-action-77", status: "previewed" }) }),
+        error: null,
+        requestId: "req-preview"
+      }, 201))
+      .mockResolvedValueOnce(jsonResponse({
+        ok: true,
+        data: automationActionRow({ id: 77, action_uuid: "automation-action-77", status: "confirmed", related_automation_run_id: 88 }),
+        error: null,
+        requestId: "req-confirm"
+      }, 202))
+      .mockResolvedValueOnce(jsonResponse({
+        ok: true,
+        data: automationRunRow(),
+        error: null,
+        requestId: "req-run"
+      }));
+    vi.stubGlobal("fetch", fetchMock);
+
+    const auth = cerbanimoAuth();
+    const preview = await handleChatTurn({
+      message: "review quality checks 203",
+      history: [],
+      session: {},
+      auth,
+      channel: "sdk"
+    });
+
+    expect(preview.message.content).toContain("quality-check action preview");
+    expect(preview.session.pendingAction?.kind).toBe("run_automation");
+    expect(preview.session.pendingAction?.cerbanimoActionId).toBe("77");
+
+    const confirmed = await handleChatTurn({
+      message: "confirm",
+      history: [],
+      session: preview.session,
+      auth,
+      channel: "sdk"
+    });
+
+    expect(confirmed.message.content).toContain("returned the report");
+    expect(JSON.stringify(confirmed.message.cards)).toContain("Quality checks passed");
+    expect(JSON.stringify(confirmed.message.cards)).toContain("Build passed");
+    expect(fetchMock.mock.calls.map((call) => String(call[0]))).toEqual([
+      "http://localhost:4000/api/v1/tasks/203/automation/preparations",
+      "http://localhost:4000/api/v1/tasks/203/automation/preparations/5/preview",
+      "http://localhost:4000/api/v1/actions/automation-action-77/confirm",
+      "http://localhost:4000/api/v1/automation/runs/88"
+    ]);
+  });
 });
 
 function cerbanimoAuth() {
@@ -249,6 +315,25 @@ function actionRow(status: string) {
     execution_result: null,
     related_project_id: status === "executed" ? 100 : null,
     created_at: "2026-07-02T12:00:00.000Z"
+  };
+}
+
+function automationActionRow(overrides: Record<string, unknown> = {}) {
+  return {
+    id: 77,
+    action_uuid: "automation-action-77",
+    status: "previewed",
+    risk_level: "normal",
+    intent_json: { functionName: "tasks.run_automation" },
+    preview_payload: {
+      title: "Run quality checks for Run baseline repository quality checks",
+      summary: "Cerbanimo will run quality checks after confirmation."
+    },
+    execution_result: null,
+    related_project_id: null,
+    related_task_id: 203,
+    created_at: "2026-07-02T12:00:00.000Z",
+    ...overrides
   };
 }
 
@@ -325,6 +410,76 @@ function completedDetail() {
     terminal: true,
     result: null,
     error: null
+  };
+}
+
+function taskAutomationContext(overrides: Record<string, unknown> = {}) {
+  return {
+    task: {
+      id: 203,
+      name: "Run baseline repository quality checks",
+      status: "active-unassigned",
+      automation: qualityAutomation()
+    },
+    automation: qualityAutomation(),
+    inputSchema: [
+      { key: "repository", label: "Repository", inputType: "repository", required: true, sensitive: false },
+      { key: "ref", label: "Ref", inputType: "text", required: true, sensitive: false },
+      { key: "checkProfile", label: "Check profile", inputType: "choice", required: true, sensitive: false },
+      { key: "approval", label: "Approval", inputType: "approval", required: true, sensitive: false }
+    ],
+    preparation: { id: 5, status: "ready", capability_name: "github.run_quality_checks" },
+    validation: { valid: true, errors: [], findings: [] },
+    capability: {
+      requiredCapabilities: ["github.run_quality_checks"],
+      availableCapabilities: ["github.run_quality_checks"],
+      missingCapabilities: [],
+      actorAuthorized: true,
+      executionAvailable: true,
+      templateKey: "run_quality_checks",
+      executor: "deterministic",
+      reasons: []
+    },
+    ...overrides
+  };
+}
+
+function qualityAutomation() {
+  return {
+    classification: "fully_automatable",
+    confidenceBand: "high",
+    rationale: "Bounded digital verification.",
+    requiredHumanInputs: [],
+    requirements: { capabilities: ["github.run_quality_checks"], expectedArtifacts: ["quality-check-report"] },
+    validationRequirements: [],
+    source: "generated",
+    findings: []
+  };
+}
+
+function automationRunRow() {
+  return {
+    id: 88,
+    run_uuid: "automation-run-88",
+    status: "completed",
+    template_key: "run_quality_checks",
+    result: {
+      status: "checks_passed",
+      summary: "Quality checks passed.",
+      submittedTask: true,
+      checks: [{ key: "build", status: "passed", message: "Build passed." }]
+    },
+    logs: []
+  };
+}
+
+function jsonResponse(body: unknown, status = 200) {
+  return {
+    ok: status < 400,
+    status,
+    statusText: status < 400 ? "OK" : "Bad Request",
+    headers: new Headers({ "x-request-id": (body as { requestId?: string }).requestId ?? "req-test" }),
+    json: async () => body
   };
 }
 

@@ -3,14 +3,15 @@ import type {
   ChatMessage,
   ChatTurnRequest,
   ChatTurnResponse,
-  ProjectBootstrapActionDetail
+  ProjectBootstrapActionDetail,
+  TaskAutomationContext
 } from "../../shared/types";
 import { matchSlashCommand } from "../../shared/commands";
 import {
   actionPreviewCard,
   actionQueueCard,
+  automationRunResultCard,
   automationTemplatesCard,
-  assistedTaskInputsCard,
   activeTaskCard,
   integrationCard,
   helpCard,
@@ -24,6 +25,7 @@ import {
   taskListCard,
   validationReportCard,
   modeCard,
+  taskAutomationPreparationCard,
   workflowFailureCard,
   workflowProgressCard
 } from "./cardFactory";
@@ -64,14 +66,18 @@ async function buildChatTurnResponse(request: ChatTurnRequest): Promise<ChatTurn
     }, undefined, [activeTaskCard(detail.data.activeTasks)]);
   }
 
+  const taskAutomationCommand = parseTaskAutomationCommand(message);
+  if (taskAutomationCommand?.kind === "prepare") {
+    return prepareTaskAutomation(request, taskAutomationCommand.taskId, taskAutomationCommand.inputValues);
+  }
+
+  if (taskAutomationCommand?.kind === "quality_checks") {
+    return reviewQualityChecks(request, taskAutomationCommand.taskId);
+  }
+
   if (/^view required inputs\b/i.test(message) && request.session.activeAction?.actionId) {
-    const detail = await new CerbanimoClient(request.auth).getActionDetail(request.session.activeAction.actionUuid ?? request.session.activeAction.actionId);
-    if (!detail.ok || !detail.data) return respond(`I could not refresh task input requirements from Cerbanimo: ${detail.error}`, request.session);
     const taskId = message.replace(/^view required inputs\b/i, "").trim();
-    return respond("Here are the assisted automation input requirements Cerbanimo returned. Execution is not enabled in this release.", {
-      ...request.session,
-      activeAction: activeStateFromDetail(detail.data, detail.requestId)
-    }, undefined, [assistedTaskInputsCard(detail.data.activeTasks, taskId)]);
+    if (taskId) return prepareTaskAutomation(request, taskId, {});
   }
 
   if (request.session.pendingAction && isCancel(message)) {
@@ -266,6 +272,85 @@ async function buildChatTurnResponse(request: ChatTurnRequest): Promise<ChatTurn
   );
 }
 
+async function prepareTaskAutomation(
+  request: ChatTurnRequest,
+  taskId: string,
+  inputValues: Record<string, unknown>
+): Promise<ChatTurnResponse> {
+  const cerbanimo = new CerbanimoClient(request.auth);
+  const hasInputs = Object.keys(inputValues).length > 0;
+  const result = hasInputs
+    ? await cerbanimo.createTaskAutomationPreparation(taskId, { inputValues })
+    : await cerbanimo.getTaskAutomation(taskId);
+
+  if (!result.ok || !result.data) {
+    return respond(`I could not load task automation state from Cerbanimo: ${result.error}`, request.session);
+  }
+
+  const context = result.data;
+  const message = context.preparation
+    ? `Cerbanimo saved the task automation preparation as ${context.preparation.status}.`
+    : context.inputSchema.length
+      ? "Cerbanimo returned the required task automation inputs. Send them as key=value pairs after the prepare command when you are ready."
+      : "Cerbanimo returned the task automation policy for this task.";
+
+  return respond(message, request.session, undefined, [taskAutomationPreparationCard(context)]);
+}
+
+async function reviewQualityChecks(request: ChatTurnRequest, taskId: string): Promise<ChatTurnResponse> {
+  const cerbanimo = new CerbanimoClient(request.auth);
+  const repository = process.env.KAMIYA_DEFAULT_QUALITY_CHECK_REPOSITORY;
+  const ref = process.env.KAMIYA_DEFAULT_QUALITY_CHECK_REF ?? "main";
+
+  if (!repository) {
+    const context = await cerbanimo.getTaskAutomation(taskId);
+    if (!context.ok || !context.data) {
+      return respond(`I could not load quality-check requirements from Cerbanimo: ${context.error}`, request.session);
+    }
+    return respond(
+      "Cerbanimo needs a repository before I can prepare quality checks. Send `prepare task automation " + taskId + " repository=owner/name ref=main checkProfile=node_standard approval=yes`.",
+      request.session,
+      undefined,
+      [taskAutomationPreparationCard(context.data)]
+    );
+  }
+
+  const prepared = await cerbanimo.createTaskAutomationPreparation(taskId, {
+    capabilityName: "github.run_quality_checks",
+    inputValues: {
+      repository,
+      ref,
+      checkProfile: "node_standard",
+      approval: true
+    }
+  });
+  if (!prepared.ok || !prepared.data) {
+    return respond(`Cerbanimo could not save the quality-check preparation: ${prepared.error}`, request.session);
+  }
+
+  if (!prepared.data.preparation?.id || !prepared.data.capability.executionAvailable) {
+    return respond(
+      `Cerbanimo saved the preparation, but it is not executable yet. Reasons: ${prepared.data.capability.reasons.join(", ") || "unknown"}.`,
+      request.session,
+      undefined,
+      [taskAutomationPreparationCard(prepared.data)]
+    );
+  }
+
+  const preview = await cerbanimo.previewTaskAutomationPreparation(taskId, prepared.data.preparation.id);
+  if (!preview.ok || !preview.data?.action) {
+    return respond(`Cerbanimo could not create a quality-check action preview: ${preview.error}`, request.session, undefined, [taskAutomationPreparationCard(prepared.data)]);
+  }
+
+  const action = automationPreviewFromTaskContext(preview.data);
+  return respond(
+    "I prepared a Cerbanimo quality-check action preview. Please confirm before Cerbanimo runs repository checks.",
+    { ...request.session, pendingAction: action },
+    undefined,
+    [taskAutomationPreparationCard(preview.data), actionPreviewCard(action)]
+  );
+}
+
 async function persistChatTurn(request: ChatTurnRequest, response: ChatTurnResponse): Promise<ChatTurnResponse> {
   if (request.channel && request.channel !== "web") return response;
   if (!request.auth.isLoggedIn) return response;
@@ -452,11 +537,12 @@ async function executePendingAction(request: ChatTurnRequest): Promise<ChatTurnR
   }
 
   const taskWaitTimedOut = Boolean((result.data as { taskWaitTimedOut?: unknown } | undefined)?.taskWaitTimedOut);
+  const automationRun = (result.data as { automationRun?: unknown } | undefined)?.automationRun;
   const record = {
     id: crypto.randomUUID(),
     previewId: action.id,
     kind: action.kind,
-    status: taskWaitTimedOut ? ("failed" as const) : action.kind === "run_automation" ? ("queued" as const) : ("completed" as const),
+    status: taskWaitTimedOut ? ("failed" as const) : action.kind === "run_automation" ? automationHistoryStatus(automationRun) : ("completed" as const),
     title: action.title,
     summary: action.summary,
     createdAt: new Date().toISOString(),
@@ -467,7 +553,9 @@ async function executePendingAction(request: ChatTurnRequest): Promise<ChatTurnR
   const actionHistory = [record, ...(request.session.actionHistory ?? [])].slice(0, 8);
 
   return respond(
-    result.mocked
+    action.kind === "run_automation" && automationRun
+      ? "Confirmed. Cerbanimo ran the automation and returned the report below."
+      : result.mocked
       ? "Confirmed. I simulated the Cerbanimo call because live API credentials are not configured yet."
       : "Confirmed. I sent the action to Cerbanimo and logged the result.",
     {
@@ -479,8 +567,82 @@ async function executePendingAction(request: ChatTurnRequest): Promise<ChatTurnR
       actionHistory
     },
     undefined,
-    [actionQueueCard(actionHistory, result.mocked)]
+    [
+      ...(action.kind === "run_automation" && isAutomationRunRecord(automationRun) ? [automationRunResultCard(automationRun)] : []),
+      actionQueueCard(actionHistory, result.mocked)
+    ]
   );
+}
+
+function parseTaskAutomationCommand(message: string): { kind: "prepare" | "quality_checks"; taskId: string; inputValues: Record<string, unknown> } | undefined {
+  const prepare = message.match(/^(?:prepare task automation|view required inputs)\s+(\S+)(.*)$/i);
+  if (prepare?.[1]) {
+    return { kind: "prepare", taskId: prepare[1], inputValues: parseKeyValueInputs(prepare[2] ?? "") };
+  }
+
+  const quality = message.match(/^(?:review|run)\s+quality(?:-|\s*)checks(?:\s+run)?\s+(\S+)/i);
+  if (quality?.[1]) {
+    return { kind: "quality_checks", taskId: quality[1], inputValues: {} };
+  }
+
+  return undefined;
+}
+
+function parseKeyValueInputs(value: string): Record<string, unknown> {
+  const inputValues: Record<string, unknown> = {};
+  const pattern = /([A-Za-z][A-Za-z0-9_:-]*)=(?:"([^"]*)"|'([^']*)'|(\S+))/g;
+  for (const match of value.matchAll(pattern)) {
+    const raw = match[2] ?? match[3] ?? match[4] ?? "";
+    if (/^(yes|true|approved)$/i.test(raw)) inputValues[match[1]] = true;
+    else if (/^(no|false)$/i.test(raw)) inputValues[match[1]] = false;
+    else inputValues[match[1]] = raw;
+  }
+  return inputValues;
+}
+
+function automationPreviewFromTaskContext(context: TaskAutomationContext): NonNullable<ChatTurnResponse["session"]["pendingAction"]> {
+  const action = context.action;
+  const taskName = String(context.task.name ?? context.task.title ?? `Task ${context.task.id}`);
+  const previewPayload = action?.preview_payload ?? {};
+  return {
+    id: crypto.randomUUID(),
+    kind: "run_automation",
+    title: String(previewPayload.title ?? `Run quality checks for ${taskName}`),
+    summary: String(previewPayload.summary ?? "Cerbanimo will run quality checks after confirmation."),
+    risk: normalizeRisk(action?.risk_level),
+    destructive: false,
+    payload: {
+      taskId: context.task.id,
+      preparationId: context.preparation?.id,
+      capabilityName: context.preparation?.capability_name ?? "github.run_quality_checks"
+    },
+    requiredPermissions: ["automation:write", "actions:write"],
+    createdAt: String(action?.created_at ?? new Date().toISOString()),
+    cerbanimoActionId: action ? String(action.id) : undefined,
+    cerbanimoActionUuid: action?.action_uuid ?? undefined,
+    functionName: "tasks.run_automation"
+  };
+}
+
+function normalizeRisk(value: unknown): "low" | "medium" | "high" {
+  const risk = String(value ?? "low").toLowerCase();
+  if (risk === "high" || risk === "destructive") return "high";
+  if (risk === "medium" || risk === "normal") return "medium";
+  return "low";
+}
+
+function isAutomationRunRecord(value: unknown): value is Parameters<typeof automationRunResultCard>[0] {
+  return value !== null && typeof value === "object" && !Array.isArray(value) && "id" in value && "status" in value;
+}
+
+function automationHistoryStatus(value: unknown): "queued" | "running" | "completed" | "failed" | "cancelled" {
+  if (!isAutomationRunRecord(value)) return "queued";
+  const status = String(value.status);
+  if (status === "cancelled") return "cancelled";
+  if (status === "failed" || status === "blocked") return "failed";
+  if (status === "completed") return "completed";
+  if (status === "running") return "running";
+  return "queued";
 }
 
 function respond(

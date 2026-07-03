@@ -276,3 +276,36 @@ The normalizer is deterministic and never calls an LLM. It applies fail-closed r
 - `Automation-ready classification`.
 
 Packet 004 intentionally does not execute automation. Fully automatable cards say execution capability is not connected yet, and Kamiya does not render an enabled `Automate` button.
+
+## 13. Packet 005/006 Task Automation Preparation And Quality Checks Delta
+
+Evidence basis: Kamiya and Cerbanimo Packet 005/006 branches.
+
+```mermaid
+sequenceDiagram
+  participant Browser as Kamiya browser
+  participant KApi as Kamiya API
+  participant CApi as Cerbanimo /api/v1
+  participant DB as PostgreSQL
+  participant Worker as automation-execution worker
+  Browser->>KApi: Prepare or review active task automation
+  KApi->>CApi: GET /tasks/:taskId/automation
+  CApi->>DB: hydrate task metadata, active preparation, capability
+  KApi->>CApi: POST /tasks/:taskId/automation/preparations
+  CApi->>DB: snapshot schema, validate, save sanitized values
+  KApi->>CApi: POST /preparations/:id/preview
+  CApi->>DB: create tasks.run_automation preview action
+  Browser->>KApi: confirm
+  KApi->>CApi: POST /actions/:id/confirm
+  CApi->>DB: create automation_runs row and consume preparation
+  CApi->>Worker: queue automationRunId
+  Worker->>DB: claim, run deterministic quality check, log report
+  Worker->>DB: submit task on checks_passed
+  KApi->>CApi: GET /automation/runs/:id until terminal
+```
+
+Cerbanimo owns `task_automation_preparations`, input validation, capability resolution, preview creation, automation runs, worker execution, logs, and task submission mapping.
+
+Kamiya owns conversational routing, cards, pending-action presentation, and a temporary command-style key/value path for preparation input. It now renders `Prepare with Kamiya` for assisted tasks and `Review quality checks` for the bounded quality-check capability.
+
+Production repository execution remains unavailable without a sandbox. Capability resolution must return `PRODUCTION_SANDBOX_REQUIRED` or another explicit reason instead of silently running code in the API process.

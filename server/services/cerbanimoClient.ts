@@ -2,6 +2,7 @@ import { z } from "zod";
 import type {
   ActionPreview,
   ActiveCerbanimoActionState,
+  AutomationRun,
   CerbanimoAction,
   CerbanimoResult,
   ChatMessage,
@@ -9,7 +10,8 @@ import type {
   KamiyaSavedChat,
   KamiyaSavedChatSummary,
   KamiyaSessionState,
-  ProjectBootstrapActionDetail
+  ProjectBootstrapActionDetail,
+  TaskAutomationContext
 } from "../../shared/types";
 
 const apiEnvelopeSchema = z.object({
@@ -28,6 +30,8 @@ const cerbanimoActionSchema = z.object({
   preview_payload: z.record(z.unknown()).optional().nullable(),
   execution_result: z.unknown().optional().nullable(),
   related_project_id: z.number().optional().nullable(),
+  related_task_id: z.number().optional().nullable(),
+  related_automation_run_id: z.union([z.number(), z.string()]).optional().nullable(),
   created_at: z.string().optional().nullable(),
   confirmed_at: z.string().optional().nullable(),
   executed_at: z.string().optional().nullable()
@@ -120,6 +124,91 @@ const projectBootstrapActionDetailSchema = z.object({
   terminal: z.boolean().default(false),
   result: z.unknown().optional().nullable(),
   error: z.unknown().optional().nullable()
+}).passthrough();
+
+const taskAutomationInputSchema = z.object({
+  key: z.string(),
+  label: z.string(),
+  description: z.string().optional(),
+  inputType: z.string(),
+  required: z.boolean().default(true),
+  sensitive: z.boolean().default(false),
+  options: z.array(z.object({ value: z.string(), label: z.string() })).optional()
+}).passthrough();
+
+const taskAutomationValidationSchema = z.object({
+  valid: z.boolean(),
+  errors: z.array(z.object({
+    key: z.string().optional(),
+    code: z.string().optional(),
+    message: z.string().optional()
+  }).passthrough()).default([]),
+  findings: z.array(z.object({
+    key: z.string().optional(),
+    code: z.string().optional(),
+    message: z.string().optional()
+  }).passthrough()).default([]).optional(),
+  sanitizedValues: z.record(z.unknown()).optional()
+}).passthrough();
+
+const taskAutomationCapabilitySchema = z.object({
+  classification: z.string().optional(),
+  requiredCapabilities: z.array(z.string()).default([]),
+  availableCapabilities: z.array(z.string()).default([]),
+  missingCapabilities: z.array(z.string()).default([]),
+  actorAuthorized: z.boolean().default(false),
+  executionAvailable: z.boolean().default(false),
+  templateKey: z.string().nullable().optional(),
+  executor: z.string().nullable().optional(),
+  reasons: z.array(z.string()).default([])
+}).passthrough();
+
+const taskAutomationPreparationSchema = z.object({
+  id: z.union([z.number(), z.string()]),
+  preparation_uuid: z.string().optional().nullable(),
+  task_id: z.union([z.number(), z.string()]).optional(),
+  actor_user_id: z.union([z.number(), z.string()]).optional(),
+  capability_name: z.string().optional().nullable(),
+  status: z.string(),
+  input_schema_snapshot: z.array(taskAutomationInputSchema).optional(),
+  input_values: z.record(z.unknown()).optional(),
+  validation_result: taskAutomationValidationSchema.optional().nullable(),
+  capability_snapshot: taskAutomationCapabilitySchema.optional().nullable(),
+  preview_action_id: z.union([z.number(), z.string()]).optional().nullable(),
+  created_at: z.string().optional().nullable(),
+  updated_at: z.string().optional().nullable()
+}).passthrough();
+
+const taskAutomationContextSchema = z.object({
+  task: taskSchema,
+  automation: taskAutomationSchema,
+  inputSchema: z.array(taskAutomationInputSchema).default([]),
+  preparation: taskAutomationPreparationSchema.optional().nullable(),
+  validation: taskAutomationValidationSchema.optional().nullable(),
+  capability: taskAutomationCapabilitySchema,
+  policies: z.record(z.unknown()).optional(),
+  action: cerbanimoActionSchema.optional(),
+  template: z.record(z.unknown()).optional()
+}).passthrough();
+
+const automationRunSchema = z.object({
+  id: z.union([z.number(), z.string()]),
+  run_uuid: z.string().optional().nullable(),
+  action_id: z.union([z.number(), z.string()]).optional().nullable(),
+  preparation_id: z.union([z.number(), z.string()]).optional().nullable(),
+  template_key: z.string().optional(),
+  status: z.string(),
+  input: z.record(z.unknown()).optional(),
+  result: z.record(z.unknown()).optional().nullable(),
+  logs: z.array(z.object({
+    level: z.string().optional(),
+    message: z.string().optional(),
+    payload: z.unknown().optional(),
+    created_at: z.string().optional().nullable()
+  }).passthrough()).default([]).optional(),
+  created_at: z.string().optional().nullable(),
+  started_at: z.string().optional().nullable(),
+  completed_at: z.string().optional().nullable()
 }).passthrough();
 
 const defaultRequestTimeoutMs = 15_000;
@@ -239,6 +328,54 @@ export class CerbanimoClient {
     return this.requestV1(`/actions${suffix}`, "GET", undefined, z.object({ actions: z.array(cerbanimoActionSchema) })) as Promise<CerbanimoResult<{ actions: CerbanimoAction[] }>>;
   }
 
+  async getTaskAutomation(taskId: string | number): Promise<CerbanimoResult<TaskAutomationContext>> {
+    return this.requestV1(
+      `/tasks/${encodeURIComponent(String(taskId))}/automation`,
+      "GET",
+      undefined,
+      taskAutomationContextSchema
+    ) as Promise<CerbanimoResult<TaskAutomationContext>>;
+  }
+
+  async createTaskAutomationPreparation(
+    taskId: string | number,
+    input: { capabilityName?: string | null; inputValues?: Record<string, unknown> }
+  ): Promise<CerbanimoResult<TaskAutomationContext>> {
+    return this.requestV1(
+      `/tasks/${encodeURIComponent(String(taskId))}/automation/preparations`,
+      "POST",
+      input,
+      taskAutomationContextSchema
+    ) as Promise<CerbanimoResult<TaskAutomationContext>>;
+  }
+
+  async validateTaskAutomationPreparation(taskId: string | number, preparationId: string | number): Promise<CerbanimoResult<TaskAutomationContext>> {
+    return this.requestV1(
+      `/tasks/${encodeURIComponent(String(taskId))}/automation/preparations/${encodeURIComponent(String(preparationId))}/validate`,
+      "POST",
+      {},
+      taskAutomationContextSchema
+    ) as Promise<CerbanimoResult<TaskAutomationContext>>;
+  }
+
+  async previewTaskAutomationPreparation(taskId: string | number, preparationId: string | number): Promise<CerbanimoResult<TaskAutomationContext>> {
+    return this.requestV1(
+      `/tasks/${encodeURIComponent(String(taskId))}/automation/preparations/${encodeURIComponent(String(preparationId))}/preview`,
+      "POST",
+      { sourceClient: "kamiya-web" },
+      taskAutomationContextSchema
+    ) as Promise<CerbanimoResult<TaskAutomationContext>>;
+  }
+
+  async getAutomationRun(runId: string | number): Promise<CerbanimoResult<AutomationRun>> {
+    return this.requestV1(
+      `/automation/runs/${encodeURIComponent(String(runId))}`,
+      "GET",
+      undefined,
+      automationRunSchema
+    ) as Promise<CerbanimoResult<AutomationRun>>;
+  }
+
   async executeAction(action: ActionPreview): Promise<CerbanimoResult> {
     if (!this.apiUrl || !this.token) {
       return {
@@ -267,6 +404,24 @@ export class CerbanimoClient {
     }
 
     if (action.kind === "run_automation") {
+      const actionId = action.cerbanimoActionUuid ?? action.cerbanimoActionId;
+      if (actionId) {
+        const confirmed = await this.confirmAction(actionId);
+        if (!confirmed.ok || !confirmed.data) return confirmed;
+        const runId = confirmed.data.related_automation_run_id ?? automationRunIdFromExecutionResult(confirmed.data.execution_result);
+        if (!runId) {
+          return {
+            ok: true,
+            data: { action: confirmed.data },
+            requestId: confirmed.requestId
+          };
+        }
+
+        const run = await this.pollAutomationRun(runId);
+        return run.ok
+          ? { ok: true, data: { action: confirmed.data, automationRun: run.data }, requestId: run.requestId ?? confirmed.requestId }
+          : { ...run, data: { action: confirmed.data } };
+      }
       return this.request("/automation/actions", "POST", action.payload);
     }
 
@@ -558,7 +713,7 @@ export class CerbanimoClient {
       if (!parsed.success) {
         return {
           ok: false,
-          error: `Cerbanimo response did not match the expected contract: ${parsed.error.issues.map((issue) => issue.message).join("; ")}`,
+          error: `Cerbanimo response did not match the expected contract: ${parsed.error.issues.map((issue) => `${issue.path.join(".") || "(root)"}: ${issue.message}`).join("; ")}`,
           code: "CONTRACT_PARSE_FAILED",
           status: response.status,
           requestId
@@ -593,6 +748,28 @@ export class CerbanimoClient {
       startedAt: action.created_at ?? new Date().toISOString(),
       lastHydratedAt: new Date().toISOString(),
       requestId
+    };
+  }
+
+  private async pollAutomationRun(runId: string | number): Promise<CerbanimoResult<AutomationRun>> {
+    const terminalStatuses = new Set(["completed", "failed", "blocked", "cancelled"]);
+    const timeoutMs = Number(process.env.KAMIYA_AUTOMATION_RUN_POLL_TIMEOUT_MS ?? 30_000);
+    const deadline = Date.now() + Math.max(1_000, timeoutMs);
+    let last: CerbanimoResult<AutomationRun> | undefined;
+    let attempt = 0;
+    while (Date.now() < deadline) {
+      last = await this.getAutomationRun(runId);
+      if (!last.ok) return last;
+      if (last.data && terminalStatuses.has(String(last.data.status))) return last;
+      attempt += 1;
+      await delay(Math.min(1200, 300 + attempt * 150));
+    }
+    return {
+      ok: false,
+      error: "Cerbanimo did not finish the automation run within 30 seconds. Retry from the action preview after checking the run state.",
+      code: "AUTOMATION_RUN_TIMEOUT",
+      retryable: true,
+      data: last?.data
     };
   }
 }
@@ -649,4 +826,14 @@ function e2eBootstrapArguments(payload: Record<string, unknown>): Record<string,
     e2eRunId: payload._e2eRunId,
     e2eControlDir: payload._e2eControlDir
   };
+}
+
+function automationRunIdFromExecutionResult(value: unknown): number | string | undefined {
+  if (!isRecord(value)) return undefined;
+  const runId = value.automationRunId ?? value.automation_run_id;
+  return typeof runId === "number" || typeof runId === "string" ? runId : undefined;
+}
+
+function delay(ms: number): Promise<void> {
+  return new Promise((resolve) => setTimeout(resolve, ms));
 }

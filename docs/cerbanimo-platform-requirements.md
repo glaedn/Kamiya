@@ -55,6 +55,31 @@ Canonical classifications are `human_driven`, `assisted_automation`, and `fully_
 
 Classification is eligibility only. Cerbanimo must keep capability availability, authorization, confirmation, execution, and validation as separate contracts.
 
+### Durable Task Automation Preparation
+
+Status: implemented for Packet 005/006 branches.
+
+Cerbanimo must own:
+
+- actor-owned `task_automation_preparations`;
+- schema snapshots from task `required_human_inputs` or capability-specific schemas;
+- server-side validation and sanitized input storage;
+- capability resolution with explicit blocker reasons;
+- idempotent preview creation through `tasks.run_automation`;
+- cancellation and consumed-preparation state transitions.
+
+Kamiya depends on the canonical `/api/v1/tasks/:taskId/automation` preparation routes documented in [task-automation-preparation.md](./task-automation-preparation.md).
+
+### `github.run_quality_checks`
+
+Status: implemented for deterministic E2E execution only.
+
+Cerbanimo must expose `github.run_quality_checks` as a registered capability and `run_quality_checks` as the automation template behind `tasks.run_automation`.
+
+The executor must fail closed in production until a real sandbox provider is configured. The deterministic executor is only for protected E2E mode and must never run against production-like databases or hosts.
+
+Successful checks submit the task for review with a report artifact URI. They must not award rewards, mark the task complete, push code, create PRs, merge, deploy, or publish anything externally.
+
 ### `POST /ai/intent-route`
 
 Central platform endpoint for model-independent intent routing. Kamiya can route locally today, but this should become a Cerbanimo API so future clients share a single intent taxonomy.

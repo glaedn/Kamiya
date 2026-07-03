@@ -383,7 +383,7 @@ export default function App() {
               <strong>{session.pendingAction.title}</strong>
               <p>{session.pendingAction.summary}</p>
               <button className="primary wide" type="button" onClick={() => void submitMessage("confirm")}>
-                Confirm quest creation
+                {session.pendingAction.kind === "create_project" ? "Confirm quest creation" : "Confirm action"}
               </button>
             </div>
           ) : (

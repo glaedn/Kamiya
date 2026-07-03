@@ -12,7 +12,7 @@ import {
   screenshot,
   startGoldenQuest
 } from "./real-stack/browserFlow";
-import { expectSuccessfulBootstrap } from "./real-stack/db";
+import { expectQualityCheckAutomation, expectSuccessfulBootstrap } from "./real-stack/db";
 import { releaseProviderHold, waitForProviderHold } from "./real-stack/providerControl";
 import { readRealStackState, scenarioRunId } from "./real-stack/state";
 
@@ -65,22 +65,32 @@ test.describe("golden conversation real-stack integration", () => {
       await expect(page.getByText("github.run_quality_checks").first()).toBeVisible();
       await expect(page.getByText("quality-check-report").first()).toBeVisible();
       await expect(page.getByRole("button", { name: /^Automate$/i })).toHaveCount(0);
+      await expect(page.getByRole("button", { name: "Prepare with Kamiya" })).toBeVisible();
+      await expect(page.getByRole("button", { name: "Review quality checks" })).toBeVisible();
       await page.getByRole("button", { name: "Explore active tasks" }).click();
       await expect(page.getByText("Here are the active tasks Cerbanimo says can begin now.")).toBeVisible();
       await expect(page.getByText("Needs 4 inputs: Repository, Target branch, Acceptance criteria, ...").first()).toBeVisible();
-      await page.getByRole("button", { name: "View required inputs" }).first().click();
-      await expect(page.getByText("Execution is not enabled in this release.").first()).toBeVisible();
+      await page.getByRole("button", { name: "Prepare with Kamiya" }).first().click();
+      await expect(page.getByRole("heading", { name: "Task automation: Prototype constitution voting" })).toBeVisible();
+      await expect(page.getByText("CAPABILITY_NOT_REGISTERED").first()).toBeVisible();
       await expect(page.getByText("The behavior the prototype must satisfy before review.").first()).toBeVisible();
+      await page.getByRole("button", { name: "Review quality checks" }).first().click();
+      await expect(page.getByText("quality-check action preview").first()).toBeVisible();
+      await page.getByRole("button", { name: "Confirm action" }).first().click();
+      await expect(page.getByRole("heading", { name: "Quality checks passed" })).toBeVisible({ timeout: 20_000 });
+      await expect(page.getByText("Build passed.").first()).toBeVisible();
       await screenshot(page, "real-stack-completed.png");
       await expectNoSeriousAxe(page);
     });
 
     const report = await expectSuccessfulBootstrap(runId);
+    const automationReport = await expectQualityCheckAutomation(report.projectId);
     await writeSummary({
       profile: "real-stack-success",
       runId,
       actionId,
       projectId: report.projectId,
+      automation: automationReport,
       database: report,
       commits: {
         kamiya: state.kamiyaCommit,
@@ -94,10 +104,14 @@ test.describe("golden conversation real-stack integration", () => {
       expect(paths.some((entry) => entry.includes("POST /api/v1/actions/preview"))).toBe(true);
       expect(paths.some((entry) => /POST \/api\/v1\/actions\/[^/]+\/confirm/.test(entry))).toBe(true);
       expect(paths.some((entry) => /GET \/api\/v1\/actions\/[^/]+/.test(entry))).toBe(true);
+      expect(paths.some((entry) => /GET \/api\/v1\/tasks\/[^/]+\/automation/.test(entry))).toBe(true);
+      expect(paths.some((entry) => /POST \/api\/v1\/tasks\/[^/]+\/automation\/preparations/.test(entry))).toBe(true);
+      expect(paths.some((entry) => /POST \/api\/v1\/tasks\/[^/]+\/automation\/preparations\/[^/]+\/preview/.test(entry))).toBe(true);
+      expect(paths.some((entry) => /GET \/api\/v1\/automation\/runs\/[^/]+/.test(entry))).toBe(true);
       expect(paths.some((entry) => entry.includes("/platform"))).toBe(false);
       expect(paths.some((entry) => entry.includes("/projects/create"))).toBe(false);
       expect(paths.some((entry) => entry.includes("/projects/auto-generate"))).toBe(false);
-      expect(paths.filter((entry) => /POST \/api\/v1\/actions\/[^/]+\/confirm/.test(entry))).toHaveLength(1);
+      expect(paths.filter((entry) => /POST \/api\/v1\/actions\/[^/]+\/confirm/.test(entry))).toHaveLength(2);
     });
 
     await test.step("secret and browser health checks", async () => {

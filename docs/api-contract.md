@@ -181,7 +181,19 @@ Cerbanimo `/api/v1` task payloads include a canonical `automation` object on tas
 
 Allowed `classification` values are `human_driven`, `assisted_automation`, and `fully_automatable`. Missing or malformed automation metadata must be treated as `human_driven` by clients.
 
-Kamiya renders this metadata but does not infer execution permission from it. Packet 004 supports a read-only `View required inputs` control for assisted tasks and intentionally hides any enabled `Automate` control.
+Kamiya renders this metadata but does not infer execution permission from it. Capability availability, actor scope, input completion, executor configuration, and policy state come from Cerbanimo task automation context.
+
+Task automation preparation and first execution now use Cerbanimo `/api/v1`:
+
+```text
+GET  /api/v1/tasks/:taskId/automation
+POST /api/v1/tasks/:taskId/automation/preparations
+POST /api/v1/tasks/:taskId/automation/preparations/:preparationId/preview
+POST /api/v1/actions/:id/confirm
+GET  /api/v1/automation/runs/:id
+```
+
+Kamiya renders `Prepare with Kamiya` for assisted tasks and `Review quality checks` for `github.run_quality_checks`. A quality-check run can return `checks_passed`, `checks_failed`, `blocked`, `cancelled`, or `executor_failed`. Only `checks_passed` submits the task for review in Cerbanimo; it does not award rewards or mark the task complete.
 
 ## Phase 3 Automation Contract
 
@@ -221,10 +233,10 @@ Kamiya currently recognizes:
 
 Expected Cerbanimo endpoints:
 
-- `GET /automation/templates`
-- `POST /automation/actions`
-- `GET /actions`
-- `GET /automation/validation-report?target=...`
+- `GET /api/v1/automation/templates`
+- `POST /api/v1/automation/actions`
+- `GET /api/v1/actions`
+- `GET /api/v1/automation/validation-report?target=...`
 
 ## Phase 4 Client Adapter Contract
 
