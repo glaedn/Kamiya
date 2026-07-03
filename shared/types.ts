@@ -92,6 +92,8 @@ export type CardKind =
   | "integration"
   | "approval"
   | "timeline"
+  | "workflow_progress"
+  | "workflow_failure"
   | "quest_summary"
   | "search_results"
   | "action_preview"
@@ -157,6 +159,114 @@ export interface ActionPreview {
   payload: Record<string, unknown>;
   requiredPermissions: string[];
   createdAt: string;
+  cerbanimoActionId?: string;
+  cerbanimoActionUuid?: string;
+  requestId?: string;
+  functionName?: "projects.bootstrap" | string;
+}
+
+export type CerbanimoActionStatus =
+  | "previewed"
+  | "confirmed"
+  | "queued"
+  | "running"
+  | "retry_wait"
+  | "blocked"
+  | "failed"
+  | "completed"
+  | "executed"
+  | "cancelled";
+
+export interface ActiveCerbanimoActionState {
+  actionId: string;
+  actionUuid?: string;
+  workflowRunId?: string;
+  functionName: "projects.bootstrap";
+  status: CerbanimoActionStatus;
+  currentStage?: string;
+  projectId?: number;
+  startedAt?: string;
+  lastHydratedAt?: string;
+  requestId?: string;
+}
+
+export interface CerbanimoWorkflowStep {
+  id?: number | string;
+  workflow_run_id?: number | string;
+  step_name: string;
+  status: string;
+  result?: unknown;
+  payload?: unknown;
+  started_at?: string;
+  completed_at?: string;
+}
+
+export interface CerbanimoWorkflow {
+  id: number | string;
+  workflow_type?: string | null;
+  status: CerbanimoActionStatus | string;
+  action_id?: number | string | null;
+  actor_user_id?: number | string | null;
+  related_project_id?: number | null;
+  attempt_count?: number | null;
+  state?: Record<string, unknown> | null;
+  last_error?: unknown;
+  created_at?: string | null;
+  updated_at?: string | null;
+}
+
+export interface CerbanimoAction {
+  id: number | string;
+  action_uuid?: string | null;
+  status: CerbanimoActionStatus | string;
+  risk_level?: string | null;
+  intent_json?: Record<string, unknown> | null;
+  preview_payload?: Record<string, unknown> | null;
+  execution_result?: unknown;
+  related_project_id?: number | null;
+  created_at?: string | null;
+  confirmed_at?: string | null;
+  executed_at?: string | null;
+}
+
+export interface CerbanimoProject {
+  id: number;
+  name?: string;
+  title?: string;
+  description?: string;
+  due_date?: string | null;
+  outcomeStatement?: string;
+  outcomestatement?: string;
+  outcome_statement?: string;
+  [key: string]: unknown;
+}
+
+export interface CerbanimoTask {
+  id: number | string;
+  project_id?: number;
+  name?: string;
+  title?: string;
+  description?: string;
+  status?: string;
+  skill_name?: string;
+  skill_level?: number;
+  reward_tokens?: number;
+  due_date?: string | null;
+  dependencies?: Array<number | string>;
+  resolvedDependencies?: Array<number | string>;
+  [key: string]: unknown;
+}
+
+export interface ProjectBootstrapActionDetail {
+  action: CerbanimoAction;
+  workflow?: CerbanimoWorkflow | null;
+  steps: CerbanimoWorkflowStep[];
+  project?: CerbanimoProject | null;
+  tasks: CerbanimoTask[];
+  activeTasks: CerbanimoTask[];
+  terminal: boolean;
+  result?: unknown;
+  error?: unknown;
 }
 
 export interface ActionExecutionRecord {
@@ -181,6 +291,7 @@ export interface KamiyaSessionState {
   actionHistory?: ActionExecutionRecord[];
   mode?: AgentMode;
   lastProjectAction?: ActionPreview;
+  activeAction?: ActiveCerbanimoActionState;
 }
 
 export interface PlanningDraft {
@@ -191,6 +302,7 @@ export interface PlanningDraft {
   timeline?: string;
   constraints?: string;
   successCriteria?: string;
+  tags?: string[];
 }
 
 export interface PlanningAnalysis {
@@ -233,6 +345,10 @@ export interface CerbanimoResult<T = unknown> {
   ok: boolean;
   data?: T;
   error?: string;
+  code?: string | number;
+  status?: number;
+  requestId?: string;
+  retryable?: boolean;
   mocked?: boolean;
 }
 

@@ -5,7 +5,7 @@ import fs from "node:fs";
 import path from "node:path";
 import { z } from "zod";
 import type { ChatTurnRequest } from "../shared/types";
-import { handleChannelTurn, handleChatTurn } from "./services/chatService";
+import { handleChannelTurn, handleChatTurn, hydrateActionResponse } from "./services/chatService";
 import { CerbanimoClient } from "./services/cerbanimoClient";
 import { extractString, extractText, toChannelOutbound } from "./services/channelAdapter";
 
@@ -45,6 +45,11 @@ const loadChatSchema = chatAuthSchema.extend({
   chatId: z.number()
 });
 
+const actionHydrateSchema = chatAuthSchema.extend({
+  actionId: z.string().min(1),
+  session: z.record(z.unknown()).default({})
+});
+
 app.get("/api/health", (_req, res) => {
   res.json({
     ok: true,
@@ -82,6 +87,16 @@ app.post("/api/chats/load", async (req, res, next) => {
     const result = await new CerbanimoClient(parsed.auth).loadChat(parsed.chatId);
     if (!result.ok) return res.status(400).json({ ok: false, error: result.error });
     res.json(result.data);
+  } catch (error) {
+    next(error);
+  }
+});
+
+app.post("/api/actions/hydrate", async (req, res, next) => {
+  try {
+    const parsed = actionHydrateSchema.parse(req.body);
+    const response = await hydrateActionResponse(parsed.auth, parsed.session, parsed.actionId);
+    res.json(response);
   } catch (error) {
     next(error);
   }

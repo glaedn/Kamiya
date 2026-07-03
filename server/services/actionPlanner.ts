@@ -10,31 +10,32 @@ export function previewProjectCreation(draft: PlanningDraft): ActionPreview {
     id: crypto.randomUUID(),
     kind: "create_project",
     title: `Create project: ${name}`,
-    summary: `Kamiya will create a Cerbanimo project named "${name}" with outcome "${outcomeStatement}".`,
+    summary: `Kamiya will ask Cerbanimo to prepare a durable projects.bootstrap action for "${name}", then generate a project plan, map the task graph, validate dependencies, commit the project, and activate the first tasks after you confirm.`,
     risk: "low",
     destructive: false,
     payload: {
       name,
       description,
       outcomeStatement,
-      tags: tags.map((name) => ({ name })),
-      due_date: normalizeDueDate(draft.timeline),
+      tags,
+      dueDate: normalizeDueDate(draft.timeline),
       auto_assign: false,
-      autoGeneratePlan: true,
       is_service: false,
       service_visibility: ["private"],
       service_price: 0,
+      generationMode: "plan_then_tasks",
       audience: draft.audience,
       constraints: draft.constraints,
       successCriteria: draft.successCriteria
     },
     requiredPermissions: ["projects:create"],
-    createdAt: new Date().toISOString()
+    createdAt: new Date().toISOString(),
+    functionName: "projects.bootstrap"
   };
 }
 
 function normalizeTags(draft: PlanningDraft): string[] {
-  const values = [draft.audience, draft.successCriteria]
+  const values = [...(draft.tags ?? []), draft.audience, draft.successCriteria]
     .filter(Boolean)
     .flatMap((value) => String(value).split(/[,;]/g))
     .map((value) => value.trim())

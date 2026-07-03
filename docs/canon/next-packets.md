@@ -50,6 +50,22 @@ Estimated size: M
 
 Proof of completion: Local and Render auth bridge checklist, callback tests where possible, permission introspection shown in Kamiya settings.
 
+## Packet 004A: Real-Stack Golden Conversation Enablement And Task Automation Classification
+
+Goal: Turn the Packet 003 deterministic browser contract into a real-stack browser test against Cerbanimo PR #145 or reviewed descendant, then add authoritative task automation classification.
+
+User-visible outcome: Cami can create a project through Kamiya against real local Cerbanimo and see which active tasks are human-driven, assisted, or automatable without fake controls.
+
+Repository scope: Cerbanimo deterministic bootstrap provider/test DB guard/database verifier; Kamiya `e2e/golden-conversation.integration.spec.ts`, task cards, docs.
+
+Dependencies: Cerbanimo isolated e2e database/schema, deterministic `projects.bootstrap` generator mode, scoped e2e actor/token.
+
+Primary risk: Accidentally running cleanup or mutation against development/production data.
+
+Estimated size: L
+
+Proof of completion: `KAMIYA_REAL_STACK_E2E=1 npm run test:e2e:integration` passes, database verifier proves one action/workflow/project/task graph, and task cards show only implemented authoritative actions.
+
 ## Packet 005: Persistent Action Queue And Audit Log
 
 Goal: Make Cerbanimo `api_actions` the source of truth for every Kamiya mutation.

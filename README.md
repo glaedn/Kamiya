@@ -14,6 +14,23 @@ Cerbanimo stores projects, tasks, communities, rewards, memory, statistics, and 
 - Interactive response cards for projects, tasks, search, statistics, and approvals.
 - Cerbanimo API client boundary with mock-safe development behavior.
 
+## Golden Conversation v1
+
+Kamiya's project-creation golden path now uses Cerbanimo's durable `/api/v1/actions` contract:
+
+```text
+POST /api/v1/actions/preview
+POST /api/v1/actions/:id/confirm
+GET  /api/v1/actions/:id
+POST /api/v1/actions/:id/cancel
+POST /api/v1/actions/:id/retry
+GET  /api/v1/actions
+```
+
+The canonical function is `projects.bootstrap`. Kamiya owns the conversation, preview rendering, explicit confirmation, progress polling, refresh recovery, and result cards. Cerbanimo owns the persisted action, workflow, project plan generation, task graph validation, project/task persistence, activation, retries, and audit history.
+
+The older direct project creation plus `/projects/auto-generate` sequence is deprecated for Kamiya's golden project flow.
+
 ## Quick Start
 
 ```bash
@@ -36,6 +53,7 @@ Copy `.env.example` to `.env` and configure:
 - `VITE_CERBANIMO_ORIGIN`: Cerbanimo frontend origin that hosts `/auth/bridge/start`.
 - `VITE_CERBANIMO_API_BASE`: Cerbanimo API base used for user-scoped Auth0 token calls.
 - `KAMIYA_ALLOWED_ORIGIN`: web client origin for CORS.
+- `KAMIYA_CERBANIMO_TIMEOUT_MS`: optional server-side timeout for Cerbanimo API requests.
 
 For popup login, Cerbanimo must allow Kamiya's browser origin in its auth bridge settings and Auth0 callback settings. See `docs/cerbanimo-platform-requirements.md` for the platform-side work.
 
@@ -53,3 +71,14 @@ Web / Discord / Slack
 Kamiya does not own Cerbanimo business logic. It owns conversation state, prompt orchestration, previews, confirmations, and client-specific rendering.
 
 See `docs/cerbanimo-platform-requirements.md` for the Cerbanimo APIs and core platform features needed next.
+
+## Browser Tests
+
+```bash
+npm run test:e2e:contract
+npm run test:e2e:headed -- --grep "golden conversation"
+```
+
+The contract suite starts a local stateful Cerbanimo fixture and never contacts production hosts. In PowerShell, if npm drops the `--grep` option, use `npm run test:e2e:headed -- "--grep=golden conversation"` or `npx playwright test --headed --project=chromium --grep="golden conversation"`.
+
+Real-stack integration is gated behind `KAMIYA_REAL_STACK_E2E=1` and requires an isolated Cerbanimo database/schema containing `e2e` or `test` plus a deterministic project-bootstrap provider.

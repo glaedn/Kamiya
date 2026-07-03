@@ -68,6 +68,29 @@ export function hydrateAuthFromCerbanimoSession(auth: KamiyaAuthContext): Kamiya
   };
 }
 
+export function bootstrapLocalE2EAuthFromQuery(): void {
+  if (typeof window === "undefined") return;
+  const params = new URLSearchParams(window.location.search);
+  if (params.get("kamiya_e2e_auth") !== "1") return;
+  if (!["localhost", "127.0.0.1"].includes(window.location.hostname)) return;
+
+  const session: StoredCerbanimoSession = {
+    tokenType: "Bearer",
+    accessToken: "e2e-user-token",
+    expiresAt: Date.now() + 60 * 60 * 1000,
+    audience: cerbanimoApiBase(),
+    user: {
+      sub: "auth0|e2e-user",
+      name: "E2E User",
+      email: "e2e@example.test"
+    }
+  };
+  writeSession(session);
+  params.delete("kamiya_e2e_auth");
+  const nextSearch = params.toString();
+  window.history.replaceState({}, "", `${window.location.pathname}${nextSearch ? `?${nextSearch}` : ""}${window.location.hash}`);
+}
+
 export function attachCerbanimoAuth(auth: KamiyaAuthContext): KamiyaAuthContext {
   const session = getStoredCerbanimoSession();
   if (!session) return auth;
@@ -83,7 +106,7 @@ export function attachCerbanimoAuth(auth: KamiyaAuthContext): KamiyaAuthContext 
 }
 
 export function getCerbanimoAccessToken(): string | undefined {
-  return getStoredCerbanimoSession()?.accessToken ?? readStorage(sessionStorage, accessTokenKey) ?? readStorage(localStorage, accessTokenKey) ?? undefined;
+  return getStoredCerbanimoSession()?.accessToken ?? readStorage(sessionStorage, accessTokenKey) ?? undefined;
 }
 
 export function clearCerbanimoSession(): void {
@@ -161,7 +184,7 @@ export function startCerbanimoLogin(): Promise<LoginResult> {
 }
 
 function getStoredCerbanimoSession(): StoredCerbanimoSession | undefined {
-  const raw = readStorage(sessionStorage, authSessionKey) ?? readStorage(localStorage, authSessionKey);
+  const raw = readStorage(sessionStorage, authSessionKey);
   if (!raw) return undefined;
 
   try {
@@ -181,9 +204,7 @@ function getStoredCerbanimoSession(): StoredCerbanimoSession | undefined {
 function writeSession(session: StoredCerbanimoSession): void {
   const raw = JSON.stringify(session);
   sessionStorage.setItem(authSessionKey, raw);
-  localStorage.setItem(authSessionKey, raw);
   sessionStorage.setItem(accessTokenKey, session.accessToken);
-  localStorage.setItem(accessTokenKey, session.accessToken);
 }
 
 function readStorage(storage: Storage, key: string): string | null {

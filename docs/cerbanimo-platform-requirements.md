@@ -15,6 +15,23 @@ The reference repository already includes useful foundations:
 
 ## New Or Formalized APIs Needed
 
+### `/api/v1/actions/*` For `projects.bootstrap`
+
+Status: required for Golden Conversation v1 and provided by Cerbanimo PR #145 at tested head `091f7ee`.
+
+Kamiya depends on:
+
+- `POST /api/v1/actions/preview`
+- `POST /api/v1/actions/:id/confirm`
+- `GET /api/v1/actions/:id`
+- `POST /api/v1/actions/:id/cancel`
+- `POST /api/v1/actions/:id/retry`
+- `GET /api/v1/actions`
+
+`GET /api/v1/actions/:id` must return action, workflow, bootstrap steps, created project, all tasks, active tasks, result, terminal flag, safe error details, and request ID. It must not return raw prompts, tokens, provider keys, stack traces, or secrets.
+
+Kamiya's browser state is only a resumable cache. Cerbanimo remains authoritative for action ownership, workflow status, retryability, project IDs, and task activation.
+
 ### `POST /ai/intent-route`
 
 Central platform endpoint for model-independent intent routing. Kamiya can route locally today, but this should become a Cerbanimo API so future clients share a single intent taxonomy.
@@ -30,6 +47,8 @@ Returns callable Cerbanimo functions, permissions, parameter schemas, confirmati
 ### `POST /actions/preview`
 
 Creates an auditable pending action object without executing it.
+
+Deprecated for Kamiya golden project creation unless it is the versioned `/api/v1/actions/preview` endpoint above.
 
 ### `POST /actions/:id/confirm`
 
@@ -86,6 +105,7 @@ Returns renderable page descriptors/cards for profile, project, task, dashboard,
 - Scoped API tokens for chat clients and bots.
 - Bot identity mapping for Discord, Slack, and Google Chat users.
 - Permission introspection endpoint.
+- `GET /api/v1/auth/permissions` or equivalent user-scoped permission introspection so Kamiya can explain unavailable controls without replacing server authorization.
 
 ## Auth0 Bridge For Kamiya Web Login
 
@@ -193,6 +213,17 @@ Cerbanimo should own execution for:
 - Quality checks.
 
 Kamiya may classify user intent and request previews, but Cerbanimo must create the Action object, execute workers, persist logs, and emit notifications.
+
+## Real-Stack E2E Requirements
+
+The deterministic browser contract uses a local fixture. The real-stack profile still requires Cerbanimo support before it can run safely by default:
+
+- isolated local database or schema with `e2e` or `test` in its name;
+- refusal to run destructive cleanup when the target name lacks that marker;
+- deterministic project-bootstrap generator selected by explicit e2e env, impossible in production;
+- optional provider modes for delayed success, one retryable failure then success, and invalid graph;
+- a scoped e2e actor/token;
+- database verifier for one action, one workflow, seven step rows, one project, one outcome, valid tasks/dependencies, active root tasks, executed action, completed workflow, and secret-free event payloads.
 
 ## Recommended Model Configuration
 

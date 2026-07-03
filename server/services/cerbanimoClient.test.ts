@@ -2,205 +2,219 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 import type { ActionPreview } from "../../shared/types";
 import { CerbanimoClient } from "./cerbanimoClient";
 
-describe("CerbanimoClient", () => {
+const auth = {
+  isLoggedIn: true,
+  userId: "auth0|user-123",
+  cerbanimoApiUrl: "http://localhost:4000",
+  cerbanimoToken: "user-token",
+  permissions: ["projects:create", "actions:write", "actions:read"]
+};
+
+describe("CerbanimoClient /api/v1 action contract", () => {
   afterEach(() => {
+    vi.useRealTimers();
     vi.unstubAllGlobals();
   });
 
-  it("creates projects through Cerbanimo's project creation endpoint with the Auth0 user id", async () => {
-    const fetchMock = vi
-      .fn()
-      .mockResolvedValueOnce({
-        ok: true,
-        json: async () => ({ id: 42, name: "Neighborhood Garden" })
-      })
-      .mockResolvedValueOnce({
-        ok: true,
-        json: async () => ({ success: true, tasks: [] })
-      })
-      .mockResolvedValueOnce({
-        ok: true,
-        json: async () => ({ tasks: [{ id: 1, name: "Prep beds", status: "active-unassigned" }] })
-      });
-    vi.stubGlobal("fetch", fetchMock);
+  it("persists a projects.bootstrap preview through /api/v1/actions/preview", async () => {
+    const fetchMock = mockFetch({
+      ok: true,
+      data: actionRow({ id: 42, action_uuid: "action-uuid-42", status: "previewed" }),
+      requestId: "req-preview"
+    });
 
-    const action: ActionPreview = {
-      id: "preview-1",
-      kind: "create_project",
-      title: "Create project: Neighborhood Garden",
-      summary: "Create project",
-      risk: "low",
-      destructive: false,
-      requiredPermissions: ["projects:create"],
-      createdAt: new Date().toISOString(),
-      payload: {
-        name: "Neighborhood Garden",
-        description: "Build raised beds and organize volunteers",
-        outcomeStatement: "Residents have fresh produce",
-        tags: [],
-        autoGeneratePlan: true
-      }
-    };
-
-    const result = await new CerbanimoClient({
-      isLoggedIn: true,
-      userId: "auth0|user-123",
-      cerbanimoApiUrl: "http://localhost:4000",
-      cerbanimoToken: "token"
-    }).executeAction(action);
+    const result = await new CerbanimoClient(auth).previewProjectBootstrap(projectAction());
 
     expect(result.ok).toBe(true);
+    expect(result.requestId).toBe("req-preview");
+    expect(result.data?.preview.cerbanimoActionId).toBe("42");
     expect(fetchMock).toHaveBeenCalledWith(
-      "http://localhost:4000/projects/create",
+      "http://localhost:4000/api/v1/actions/preview",
       expect.objectContaining({
         method: "POST",
-        body: expect.stringContaining('"auth0_id":"auth0|user-123"')
-      })
-    );
-    expect(fetchMock).toHaveBeenCalledWith(
-      "http://localhost:4000/projects/auto-generate",
-      expect.objectContaining({
-        method: "POST",
-        body: JSON.stringify({ projectId: 42 })
+        body: expect.stringContaining('"functionName":"projects.bootstrap"')
       })
     );
   });
 
-  it("returns active tasks when Cerbanimo wraps project task results", async () => {
-    const fetchMock = vi
-      .fn()
-      .mockResolvedValueOnce({
-        ok: true,
-        json: async () => ({ id: 42, name: "Watertown Weekly MtG Meetup" })
-      })
-      .mockResolvedValueOnce({
-        ok: true,
-        json: async () => ({ success: true })
-      })
-      .mockResolvedValueOnce({
-        ok: true,
-        json: async () => ({
-          tasks: [
-            { id: 1, name: "Reserve a table", status: "active-unassigned" },
-            { id: 2, name: "Publish recap", status: "blocked" }
-          ]
-        })
-      });
-    vi.stubGlobal("fetch", fetchMock);
+  it("confirms an action and preserves 202 request IDs", async () => {
+    const fetchMock = mockFetch({
+      ok: true,
+      data: actionRow({ id: 42, status: "confirmed" }),
+      requestId: "req-confirm"
+    }, 202);
 
-    const action: ActionPreview = {
-      id: "preview-1",
-      kind: "create_project",
-      title: "Create project: Watertown Weekly MtG Meetup",
-      summary: "Create project",
-      risk: "low",
-      destructive: false,
-      requiredPermissions: ["projects:create"],
-      createdAt: new Date().toISOString(),
-      payload: {
-        name: "Watertown Weekly MtG Meetup",
-        description: "Create a local Watertown weekly get together",
-        outcomeStatement: "Build a local community around weekly MtG meetups",
-        tags: [],
-        autoGeneratePlan: true
-      }
-    };
-
-    const result = await new CerbanimoClient({
-      isLoggedIn: true,
-      userId: "auth0|user-123",
-      cerbanimoApiUrl: "http://localhost:4000",
-      cerbanimoToken: "token"
-    }).executeAction(action);
+    const result = await new CerbanimoClient(auth).confirmAction("action-uuid-42");
 
     expect(result.ok).toBe(true);
-    expect((result.data as { activeTasks: unknown[] }).activeTasks).toHaveLength(1);
+    expect(result.status).toBe(202);
+    expect(result.requestId).toBe("req-confirm");
+    expect(fetchMock.mock.calls[0][0]).toBe("http://localhost:4000/api/v1/actions/action-uuid-42/confirm");
   });
 
-  it("caps project names before sending to Cerbanimo", async () => {
+  it("hydrates action detail with workflow, project, and active tasks", async () => {
+    mockFetch({
+      ok: true,
+      data: actionDetail({ workflowStatus: "completed", actionStatus: "executed" }),
+      requestId: "req-detail"
+    });
+
+    const result = await new CerbanimoClient(auth).getActionDetail("42");
+
+    expect(result.ok).toBe(true);
+    expect(result.data?.workflow?.status).toBe("completed");
+    expect(result.data?.project?.name).toBe("Build a Democratic Digital Economy");
+    expect(result.data?.activeTasks).toHaveLength(1);
+    expect(result.requestId).toBe("req-detail");
+  });
+
+  it("supports retry and cancel action mutations", async () => {
     const fetchMock = vi
       .fn()
-      .mockResolvedValueOnce({
-        ok: true,
-        json: async () => ({ id: 42, name: "A".repeat(100) })
-      })
-      .mockResolvedValueOnce({
-        ok: true,
-        json: async () => ({ success: true })
-      })
-      .mockResolvedValueOnce({
-        ok: true,
-        json: async () => []
-      });
+      .mockResolvedValueOnce(jsonResponse({ ok: true, data: actionRow({ id: 42, status: "confirmed" }), error: null, requestId: "req-retry" }, 202))
+      .mockResolvedValueOnce(jsonResponse({ ok: true, data: actionRow({ id: 42, status: "cancelled" }), error: null, requestId: "req-cancel" }));
     vi.stubGlobal("fetch", fetchMock);
 
-    const action: ActionPreview = {
-      id: "preview-1",
-      kind: "create_project",
-      title: "Create project",
-      summary: "Create project",
-      risk: "low",
-      destructive: false,
-      requiredPermissions: ["projects:create"],
-      createdAt: new Date().toISOString(),
-      payload: {
-        name: "A".repeat(160),
-        description: "Long title project",
-        outcomeStatement: "Project succeeds",
-        tags: [],
-        autoGeneratePlan: false
-      }
-    };
+    const client = new CerbanimoClient(auth);
+    const retry = await client.retryAction("42");
+    const cancel = await client.cancelAction("42");
 
-    await new CerbanimoClient({
-      isLoggedIn: true,
-      userId: "auth0|user-123",
-      cerbanimoApiUrl: "http://localhost:4000",
-      cerbanimoToken: "token"
-    }).executeAction(action);
-
-    const body = JSON.parse(fetchMock.mock.calls[0][1].body);
-    expect(body.name).toHaveLength(100);
-    expect(body.name.endsWith("...")).toBe(true);
+    expect(retry.ok).toBe(true);
+    expect(cancel.ok).toBe(true);
+    expect(fetchMock.mock.calls[0][0]).toContain("/api/v1/actions/42/retry");
+    expect(fetchMock.mock.calls[1][0]).toContain("/api/v1/actions/42/cancel");
   });
 
-  it("formats object-shaped Cerbanimo errors readably", async () => {
-    vi.stubGlobal(
-      "fetch",
-      vi.fn().mockResolvedValueOnce({
-        ok: false,
-        status: 400,
-        statusText: "Bad Request",
-        json: async () => ({ error: { field: "name", message: "too long" } })
-      })
-    );
+  it("formats object-shaped Cerbanimo errors without [object Object]", async () => {
+    mockFetch({
+      ok: false,
+      data: null,
+      error: { code: "BOOTSTRAP_GRAPH_INVALID", message: "Graph is cyclic", details: { stage: "validateTaskGraph" } },
+      requestId: "req-error"
+    }, 400);
 
-    const action: ActionPreview = {
-      id: "preview-1",
-      kind: "create_project",
-      title: "Create project",
-      summary: "Create project",
-      risk: "low",
-      destructive: false,
-      requiredPermissions: ["projects:create"],
-      createdAt: new Date().toISOString(),
-      payload: {
-        name: "Project",
-        description: "Description",
-        outcomeStatement: "Outcome",
-        tags: [],
-        autoGeneratePlan: false
-      }
-    };
-
-    const result = await new CerbanimoClient({
-      isLoggedIn: true,
-      userId: "auth0|user-123",
-      cerbanimoApiUrl: "http://localhost:4000",
-      cerbanimoToken: "token"
-    }).executeAction(action);
+    const result = await new CerbanimoClient(auth).confirmAction("42");
 
     expect(result.ok).toBe(false);
-    expect(result.error).toContain('"field":"name"');
+    expect(result.error).toBe("Graph is cyclic");
+    expect(result.error).not.toContain("[object Object]");
+    expect(result.code).toBe("BOOTSTRAP_GRAPH_INVALID");
+    expect(result.requestId).toBe("req-error");
+  });
+
+  it("times out Cerbanimo requests with AbortController", async () => {
+    vi.useFakeTimers();
+    vi.stubGlobal("fetch", vi.fn((_url, init) => new Promise((_resolve, reject) => {
+      const signal = (init as RequestInit).signal;
+      signal?.addEventListener("abort", () => {
+        const error = new Error("aborted");
+        error.name = "AbortError";
+        reject(error);
+      });
+    })));
+
+    const promise = new CerbanimoClient(auth).getActionDetail("42");
+    await vi.advanceTimersByTimeAsync(20_000);
+    const result = await promise;
+
+    expect(result.ok).toBe(false);
+    expect(result.code).toBe("REQUEST_TIMEOUT");
+  });
+
+  it("does not call legacy project endpoints for the golden create_project execution", async () => {
+    const fetchMock = vi
+      .fn()
+      .mockResolvedValueOnce(jsonResponse({ ok: true, data: actionRow({ id: 42, status: "confirmed" }), error: null, requestId: "req-confirm" }, 202))
+      .mockResolvedValueOnce(jsonResponse({ ok: true, data: actionDetail({ workflowStatus: "queued", actionStatus: "confirmed" }), error: null, requestId: "req-detail" }));
+    vi.stubGlobal("fetch", fetchMock);
+
+    const result = await new CerbanimoClient(auth).executeAction({
+      ...projectAction(),
+      cerbanimoActionId: "42",
+      cerbanimoActionUuid: "action-uuid-42"
+    });
+
+    expect(result.ok).toBe(true);
+    const urls = fetchMock.mock.calls.map((call) => String(call[0]));
+    expect(urls).not.toContain("http://localhost:4000/projects/create");
+    expect(urls).not.toContain("http://localhost:4000/projects/auto-generate");
+    expect(urls.every((url) => url.includes("/api/v1/actions/"))).toBe(true);
   });
 });
+
+function projectAction(): ActionPreview {
+  return {
+    id: "preview-local",
+    kind: "create_project",
+    title: "Create project: Build a Democratic Digital Economy",
+    summary: "Kamiya will ask Cerbanimo to bootstrap a project.",
+    risk: "low",
+    destructive: false,
+    requiredPermissions: ["projects:create"],
+    createdAt: "2026-07-02T12:00:00.000Z",
+    functionName: "projects.bootstrap",
+    payload: {
+      name: "Build a Democratic Digital Economy",
+      description: "Design and implement a digital economic system grounded in voluntary cooperation.",
+      outcomeStatement: "A working platform where groups can coordinate economic activity without fixed hierarchy.",
+      tags: ["cooperative economics"],
+      dueDate: "2027-01-02",
+      generationMode: "plan_then_tasks"
+    }
+  };
+}
+
+function actionRow(overrides: Record<string, unknown> = {}) {
+  return {
+    id: 42,
+    action_uuid: "action-uuid-42",
+    status: "previewed",
+    risk_level: "low",
+    intent_json: { functionName: "projects.bootstrap" },
+    preview_payload: {},
+    execution_result: null,
+    related_project_id: null,
+    created_at: "2026-07-02T12:00:00.000Z",
+    ...overrides
+  };
+}
+
+function actionDetail({ workflowStatus, actionStatus }: { workflowStatus: string; actionStatus: string }) {
+  return {
+    action: actionRow({ status: actionStatus, related_project_id: workflowStatus === "completed" ? 100 : null }),
+    workflow: {
+      id: "wf-1",
+      status: workflowStatus,
+      workflow_type: "projects.bootstrap",
+      action_id: 42,
+      related_project_id: workflowStatus === "completed" ? 100 : null,
+      attempt_count: 1
+    },
+    steps: [
+      { id: 1, step_name: "validateInput", status: "completed" },
+      { id: 2, step_name: "generateProjectPlan", status: workflowStatus === "queued" ? "pending" : "completed" }
+    ],
+    project: workflowStatus === "completed" ? { id: 100, name: "Build a Democratic Digital Economy", description: "A project." } : null,
+    tasks: workflowStatus === "completed" ? [{ id: 200, name: "Map governance requirements", status: "active-unassigned" }] : [],
+    activeTasks: workflowStatus === "completed" ? [{ id: 200, name: "Map governance requirements", status: "active-unassigned" }] : [],
+    terminal: workflowStatus === "completed",
+    result: null,
+    error: null
+  };
+}
+
+function mockFetch(body: unknown, status = 200) {
+  const fetchMock = vi.fn().mockResolvedValueOnce(jsonResponse(body, status));
+  vi.stubGlobal("fetch", fetchMock);
+  return fetchMock;
+}
+
+function jsonResponse(body: unknown, status = 200) {
+  return {
+    ok: status < 400,
+    status,
+    statusText: status < 400 ? "OK" : "Bad Request",
+    headers: new Headers({ "x-request-id": (body as { requestId?: string }).requestId ?? "req-test" }),
+    json: async () => body
+  };
+}

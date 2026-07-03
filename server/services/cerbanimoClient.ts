@@ -1,4 +1,71 @@
-import type { ActionPreview, CerbanimoResult, ChatMessage, KamiyaAuthContext, KamiyaSavedChat, KamiyaSavedChatSummary, KamiyaSessionState } from "../../shared/types";
+import { z } from "zod";
+import type {
+  ActionPreview,
+  ActiveCerbanimoActionState,
+  CerbanimoAction,
+  CerbanimoResult,
+  ChatMessage,
+  KamiyaAuthContext,
+  KamiyaSavedChat,
+  KamiyaSavedChatSummary,
+  KamiyaSessionState,
+  ProjectBootstrapActionDetail
+} from "../../shared/types";
+
+const apiEnvelopeSchema = z.object({
+  ok: z.boolean(),
+  data: z.unknown().nullable().optional(),
+  error: z.unknown().nullable().optional(),
+  requestId: z.string().optional()
+});
+
+const cerbanimoActionSchema = z.object({
+  id: z.union([z.number(), z.string()]),
+  action_uuid: z.string().optional().nullable(),
+  status: z.string(),
+  risk_level: z.string().optional().nullable(),
+  intent_json: z.record(z.unknown()).optional().nullable(),
+  preview_payload: z.record(z.unknown()).optional().nullable(),
+  execution_result: z.unknown().optional().nullable(),
+  related_project_id: z.number().optional().nullable(),
+  created_at: z.string().optional().nullable(),
+  confirmed_at: z.string().optional().nullable(),
+  executed_at: z.string().optional().nullable()
+}).passthrough();
+
+const projectBootstrapActionDetailSchema = z.object({
+  action: cerbanimoActionSchema,
+  workflow: z.object({
+    id: z.union([z.number(), z.string()]),
+    status: z.string(),
+    workflow_type: z.string().optional().nullable(),
+    action_id: z.union([z.number(), z.string()]).optional().nullable(),
+    related_project_id: z.number().optional().nullable(),
+    attempt_count: z.number().optional().nullable(),
+    state: z.record(z.unknown()).optional().nullable(),
+    last_error: z.unknown().optional().nullable(),
+    created_at: z.string().optional().nullable(),
+    updated_at: z.string().optional().nullable()
+  }).passthrough().nullable().optional(),
+  steps: z.array(z.object({
+    id: z.union([z.number(), z.string()]).optional(),
+    workflow_run_id: z.union([z.number(), z.string()]).optional(),
+    step_name: z.string(),
+    status: z.string(),
+    result: z.unknown().optional().nullable(),
+    payload: z.unknown().optional().nullable(),
+    started_at: z.string().optional().nullable(),
+    completed_at: z.string().optional().nullable()
+  }).passthrough()).default([]),
+  project: z.object({ id: z.number() }).passthrough().nullable().optional(),
+  tasks: z.array(z.object({ id: z.union([z.number(), z.string()]) }).passthrough()).default([]),
+  activeTasks: z.array(z.object({ id: z.union([z.number(), z.string()]) }).passthrough()).default([]),
+  terminal: z.boolean().default(false),
+  result: z.unknown().optional().nullable(),
+  error: z.unknown().optional().nullable()
+}).passthrough();
+
+const defaultRequestTimeoutMs = 15_000;
 
 export class CerbanimoClient {
   private readonly apiUrl: string;
@@ -11,6 +78,108 @@ export class CerbanimoClient {
     this.token = auth.cerbanimoToken || process.env.KAMIYA_CERBANIMO_BEARER_TOKEN;
   }
 
+  async previewProjectBootstrap(action: ActionPreview): Promise<CerbanimoResult<{
+    action: CerbanimoAction;
+    preview: ActionPreview;
+    activeAction: ActiveCerbanimoActionState;
+  }>> {
+    if (!this.hasUserToken()) return this.missingUserAuthResult("prepare a Cerbanimo project preview");
+
+    const result = await this.previewAction({
+      intent: {
+        functionName: "projects.bootstrap",
+        arguments: {
+          name: action.payload.name,
+          description: action.payload.description,
+          outcomeStatement: action.payload.outcomeStatement,
+          dueDate: action.payload.dueDate ?? action.payload.due_date ?? null,
+          tags: action.payload.tags ?? [],
+          generationMode: action.payload.generationMode ?? "plan_then_tasks",
+          autoAssign: action.payload.auto_assign ?? false,
+          location: action.payload.location ?? null,
+          isService: action.payload.is_service ?? false,
+          serviceVisibility: action.payload.service_visibility ?? ["private"],
+          servicePrice: action.payload.service_price ?? 0
+        }
+      },
+      previewPayload: {
+        title: action.title,
+        summary: action.summary,
+        project: {
+          name: action.payload.name,
+          description: action.payload.description,
+          outcomeStatement: action.payload.outcomeStatement,
+          dueDate: action.payload.dueDate ?? action.payload.due_date ?? null,
+          tags: action.payload.tags ?? []
+        },
+        effects: [
+          "Generate a project plan",
+          "Generate and validate a task dependency graph",
+          "Persist the project, outcome, tasks, and impact nodes atomically",
+          "Activate root tasks once dependencies are clear"
+        ],
+        confirmationRequired: true,
+        permissions: action.requiredPermissions
+      },
+      sourceClient: "kamiya-web",
+      riskLevel: action.risk
+    });
+
+    if (!result.ok || !result.data) return result as CerbanimoResult<never>;
+
+    const persistedAction = result.data;
+    const preview = {
+      ...action,
+      cerbanimoActionId: String(persistedAction.id),
+      cerbanimoActionUuid: persistedAction.action_uuid ?? undefined,
+      requestId: result.requestId,
+      functionName: "projects.bootstrap"
+    };
+
+    return {
+      ok: true,
+      data: {
+        action: persistedAction,
+        preview,
+        activeAction: this.activeStateFromAction(persistedAction, result.requestId)
+      },
+      requestId: result.requestId
+    };
+  }
+
+  async previewAction(body: {
+    intent: Record<string, unknown>;
+    previewPayload?: Record<string, unknown>;
+    sourceClient?: string;
+    riskLevel?: string;
+  }): Promise<CerbanimoResult<CerbanimoAction>> {
+    return this.requestV1("/actions/preview", "POST", body, cerbanimoActionSchema) as Promise<CerbanimoResult<CerbanimoAction>>;
+  }
+
+  async confirmAction(actionId: string | number): Promise<CerbanimoResult<CerbanimoAction>> {
+    return this.requestV1(`/actions/${encodeURIComponent(String(actionId))}/confirm`, "POST", { confirmedBy: "kamiya" }, cerbanimoActionSchema) as Promise<CerbanimoResult<CerbanimoAction>>;
+  }
+
+  async getActionDetail(actionId: string | number): Promise<CerbanimoResult<ProjectBootstrapActionDetail>> {
+    return this.requestV1(`/actions/${encodeURIComponent(String(actionId))}`, "GET", undefined, projectBootstrapActionDetailSchema) as Promise<CerbanimoResult<ProjectBootstrapActionDetail>>;
+  }
+
+  async cancelAction(actionId: string | number, reason = "Cancelled from Kamiya."): Promise<CerbanimoResult<CerbanimoAction>> {
+    return this.requestV1(`/actions/${encodeURIComponent(String(actionId))}/cancel`, "POST", { reason }, cerbanimoActionSchema) as Promise<CerbanimoResult<CerbanimoAction>>;
+  }
+
+  async retryAction(actionId: string | number, reason = "Retried from Kamiya."): Promise<CerbanimoResult<CerbanimoAction>> {
+    return this.requestV1(`/actions/${encodeURIComponent(String(actionId))}/retry`, "POST", { reason }, cerbanimoActionSchema) as Promise<CerbanimoResult<CerbanimoAction>>;
+  }
+
+  async listActions(input: { limit?: number; status?: string } = {}): Promise<CerbanimoResult<{ actions: CerbanimoAction[] }>> {
+    const params = new URLSearchParams();
+    if (input.limit) params.set("limit", String(input.limit));
+    if (input.status) params.set("status", input.status);
+    const suffix = params.toString() ? `?${params.toString()}` : "";
+    return this.requestV1(`/actions${suffix}`, "GET", undefined, z.object({ actions: z.array(cerbanimoActionSchema) })) as Promise<CerbanimoResult<{ actions: CerbanimoAction[] }>>;
+  }
+
   async executeAction(action: ActionPreview): Promise<CerbanimoResult> {
     if (!this.apiUrl || !this.token) {
       return {
@@ -20,7 +189,17 @@ export class CerbanimoClient {
     }
 
     if (action.kind === "create_project") {
-      return this.createProject(action);
+      const actionId = action.cerbanimoActionUuid ?? action.cerbanimoActionId;
+      if (!actionId) {
+        return {
+          ok: false,
+          error: "Kamiya cannot confirm this quest because Cerbanimo did not return a persisted action preview. Refresh the draft and try again."
+        };
+      }
+      const confirmed = await this.confirmAction(actionId);
+      if (!confirmed.ok) return confirmed;
+      const detail = await this.getActionDetail(actionId);
+      return detail.ok ? { ...detail, data: { detail: detail.data, action: confirmed.data } } : detail;
     }
 
     if (action.kind === "submit_task") {
@@ -36,74 +215,6 @@ export class CerbanimoClient {
       ok: false,
       error: `No Cerbanimo execution mapping exists for ${action.kind}`
     };
-  }
-
-  private async createProject(action: ActionPreview): Promise<CerbanimoResult> {
-    const auth0Id = this.auth0IdForProject(action.payload);
-    if (!auth0Id) {
-      return {
-        ok: false,
-        error: "Kamiya cannot create this Cerbanimo project because the Auth0 user id is missing. Log out and log back in through the Cerbanimo Auth0 bridge, then try again."
-      };
-    }
-
-    const existingProjectId = action.payload.projectId;
-    if (existingProjectId) {
-      return this.generateAndWaitForProjectTasks({ id: existingProjectId, name: action.payload.name });
-    }
-
-    const createPayload = {
-      name: limitString(action.payload.name, 100, "Untitled quest"),
-      description: limitString(action.payload.description, 5000, "Created through Kamiya."),
-      tags: Array.isArray(action.payload.tags) ? action.payload.tags : [],
-      auth0_id: auth0Id,
-      outcomeStatement: limitString(action.payload.outcomeStatement, 5000, String(action.payload.description ?? "Created through Kamiya.")),
-      due_date: action.payload.due_date ?? null,
-      location: action.payload.location ?? null,
-      auto_assign: Boolean(action.payload.auto_assign),
-      is_service: Boolean(action.payload.is_service),
-      service_visibility: action.payload.service_visibility ?? ["private"],
-      service_price: action.payload.service_price ?? 0
-    };
-
-    const created = await this.request("/projects/create", "POST", createPayload);
-    if (!created.ok) return created;
-
-    if (action.payload.autoGeneratePlan === false) return created;
-
-    const project = (created.data ?? {}) as Record<string, unknown>;
-    const projectId = project.id;
-    if (!projectId) return created;
-
-    return this.generateAndWaitForProjectTasks(project);
-  }
-
-  private async generateAndWaitForProjectTasks(project: Record<string, unknown>): Promise<CerbanimoResult> {
-    const projectId = project.id;
-    const generated = await this.request("/projects/auto-generate", "POST", { projectId });
-    const taskStatus = await this.waitForActiveProjectTasks(projectId);
-    const taskItems = extractItems(taskStatus.data);
-    const activeTasks = taskItems.filter((task) => isActiveTask(task.status));
-
-    return {
-      ok: true,
-      data: {
-        project,
-        autoGenerate: generated.ok ? generated.data : { ok: false, error: generated.error },
-        activeTasks,
-        taskStatus: taskStatus.data,
-        taskWaitTimedOut: taskStatus.timedOut,
-        taskGenerationError: generated.ok ? undefined : generated.error
-      }
-    };
-  }
-
-  async projectTaskStatus(projectId: number | string): Promise<CerbanimoResult> {
-    if (!this.apiUrl || !this.token) {
-      return { ok: false, error: "Cerbanimo API credentials are not configured." };
-    }
-
-    return this.request(`/projects/${encodeURIComponent(String(projectId))}/task-status`, "GET");
   }
 
   async saveChat(input: {
@@ -265,7 +376,7 @@ export class CerbanimoClient {
       };
     }
 
-    return this.request("/actions", "GET");
+    return this.listActions({ limit: 20 });
   }
 
   async validationReport(target: string): Promise<CerbanimoResult> {
@@ -325,80 +436,110 @@ export class CerbanimoClient {
     return this.request("/profile/stats", "GET");
   }
 
-  private async request(path: string, method: string, body?: unknown): Promise<CerbanimoResult> {
-    const response = await fetch(`${this.apiUrl}${path}`, {
-      method,
-      headers: {
-        authorization: `Bearer ${this.token}`,
-        "content-type": "application/json"
-      },
-      body: body && method !== "GET" ? JSON.stringify(body) : undefined
-    });
+  private async requestV1<T>(path: string, method: string, body?: unknown, schema?: z.ZodType<T>): Promise<CerbanimoResult<T>> {
+    if (!this.apiUrl || !this.token) {
+      return { ok: false, error: "Cerbanimo API credentials are not configured." };
+    }
 
-    const data = await response.json().catch(() => undefined);
-    if (!response.ok) {
+    const normalizedPath = path.startsWith("/") ? path : `/${path}`;
+    const v1Path = normalizedPath.startsWith("/api/v1/") ? normalizedPath : `/api/v1${normalizedPath}`;
+    return this.requestRaw(`${this.apiUrl}${v1Path}`, method, body, schema);
+  }
+
+  private async request(path: string, method: string, body?: unknown): Promise<CerbanimoResult> {
+    return this.requestRaw(`${this.apiUrl}${path}`, method, body);
+  }
+
+  private async requestRaw<T>(url: string, method: string, body?: unknown, schema?: z.ZodType<T>): Promise<CerbanimoResult<T>> {
+    const controller = new AbortController();
+    const timeout = setTimeout(() => controller.abort(), Number(process.env.KAMIYA_CERBANIMO_TIMEOUT_MS ?? defaultRequestTimeoutMs));
+
+    let response: Response;
+    try {
+      response = await fetch(url, {
+        method,
+        headers: {
+          authorization: `Bearer ${this.token}`,
+          "content-type": "application/json"
+        },
+        body: body && method !== "GET" ? JSON.stringify(body) : undefined,
+        signal: controller.signal
+      });
+    } catch (error) {
+      const isAbort = error instanceof Error && error.name === "AbortError";
       return {
         ok: false,
-        error: errorMessageFromResponse(data, response)
+        error: isAbort ? "Cerbanimo request timed out." : error instanceof Error ? error.message : "Cerbanimo request failed.",
+        code: isAbort ? "REQUEST_TIMEOUT" : "NETWORK_ERROR",
+        retryable: true
+      };
+    } finally {
+      clearTimeout(timeout);
+    }
+
+    const data = await response.json().catch(() => undefined);
+    const envelope = apiEnvelopeSchema.safeParse(data);
+    const requestId = response.headers?.get("x-request-id") ?? (envelope.success ? envelope.data.requestId : undefined);
+
+    if (!response.ok) {
+      const errorPayload = envelope.success ? envelope.data.error : data;
+      return {
+        ok: false,
+        error: errorMessageFromResponse(errorPayload, response),
+        code: errorCodeFromResponse(errorPayload, response),
+        status: response.status,
+        requestId,
+        retryable: response.status >= 500 || response.status === 408 || response.status === 429
       };
     }
 
-    return { ok: true, data };
-  }
-
-  private async waitForActiveProjectTasks(projectId: unknown): Promise<CerbanimoResult & { timedOut?: boolean }> {
-    const deadline = Date.now() + 30_000;
-    let latest: CerbanimoResult | undefined;
-
-    while (Date.now() <= deadline) {
-      latest = await this.projectTaskStatus(String(projectId));
-      if (!latest.ok) return latest;
-
-      const items = extractItems(latest.data);
-      if (items.some((task) => isActiveTask(task.status))) return latest;
-      await wait(2_500);
+    const payload = envelope.success ? envelope.data.data : data;
+    if (schema) {
+      const parsed = schema.safeParse(payload);
+      if (!parsed.success) {
+        return {
+          ok: false,
+          error: `Cerbanimo response did not match the expected contract: ${parsed.error.issues.map((issue) => issue.message).join("; ")}`,
+          code: "CONTRACT_PARSE_FAILED",
+          status: response.status,
+          requestId
+        };
+      }
+      return { ok: true, data: parsed.data, status: response.status, requestId };
     }
 
+    return { ok: true, data: payload as T, status: response.status, requestId };
+  }
+
+  private hasUserToken(): boolean {
+    return Boolean(this.apiUrl && this.auth.isLoggedIn && this.auth.cerbanimoToken);
+  }
+
+  private missingUserAuthResult(actionDescription: string): CerbanimoResult<never> {
     return {
-      ok: true,
-      data: latest?.data ?? { projectId, tasks: [] },
-      timedOut: true
+      ok: false,
+      error: `Kamiya cannot ${actionDescription} because you are not connected to Cerbanimo with a user-scoped Auth0 token. Log in through the Cerbanimo bridge, then try again.`,
+      code: "AUTH_REQUIRED",
+      status: 401
     };
   }
 
-  private auth0IdForProject(payload: Record<string, unknown>): string | undefined {
-    const explicit = payload.auth0_id ?? payload.auth0Id;
-    if (typeof explicit === "string" && explicit.trim()) return explicit;
-    if (this.auth.userId?.trim()) return this.auth.userId;
-    if (this.auth.externalUserId?.trim()) return this.auth.externalUserId;
-    return undefined;
+  private activeStateFromAction(action: CerbanimoAction, requestId?: string): ActiveCerbanimoActionState {
+    return {
+      actionId: String(action.id),
+      actionUuid: action.action_uuid ?? undefined,
+      functionName: "projects.bootstrap",
+      status: normalizeActionStatus(action.status),
+      projectId: action.related_project_id ?? undefined,
+      startedAt: action.created_at ?? new Date().toISOString(),
+      lastHydratedAt: new Date().toISOString(),
+      requestId
+    };
   }
-}
-
-function isActiveTask(status: unknown): boolean {
-  return typeof status === "string" && /^(active|urgent|ready|open|available|in_progress)/i.test(status);
-}
-
-function extractItems(data: unknown): Array<Record<string, unknown>> {
-  if (Array.isArray(data)) return data.filter(isRecord);
-  if (!isRecord(data)) return [];
-
-  for (const key of ["tasks", "items", "results", "rows", "data"]) {
-    const value = data[key];
-    if (Array.isArray(value)) return value.filter(isRecord);
-  }
-
-  return [];
 }
 
 function isRecord(value: unknown): value is Record<string, unknown> {
   return Boolean(value) && typeof value === "object" && !Array.isArray(value);
-}
-
-function limitString(value: unknown, maxLength: number, fallback: string): string {
-  const normalized = String(value ?? fallback).trim().replace(/\s+/g, " ") || fallback;
-  if (normalized.length <= maxLength) return normalized;
-  return `${normalized.slice(0, maxLength - 3).trimEnd()}...`;
 }
 
 function errorMessageFromResponse(data: unknown, response: Response): string {
@@ -415,6 +556,29 @@ function errorMessageFromResponse(data: unknown, response: Response): string {
   return `${response.status} ${response.statusText}`;
 }
 
-function wait(ms: number): Promise<void> {
-  return new Promise((resolve) => setTimeout(resolve, ms));
+function errorCodeFromResponse(data: unknown, response: Response): string | number {
+  if (isRecord(data)) {
+    const code = data.code ?? data.status;
+    if (typeof code === "string" || typeof code === "number") return code;
+  }
+  return response.status;
+}
+
+function normalizeActionStatus(status: unknown): ActiveCerbanimoActionState["status"] {
+  const value = String(status ?? "previewed");
+  if (
+    value === "previewed" ||
+    value === "confirmed" ||
+    value === "queued" ||
+    value === "running" ||
+    value === "retry_wait" ||
+    value === "blocked" ||
+    value === "failed" ||
+    value === "completed" ||
+    value === "executed" ||
+    value === "cancelled"
+  ) {
+    return value;
+  }
+  return "confirmed";
 }

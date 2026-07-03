@@ -203,3 +203,38 @@ flowchart LR
 ```
 
 Evidence: Kamiya@69adfd2: [render.yaml](../../render.yaml); Cerbanimo@render-deploy ce5eca1: `render.yaml`. Risk: Cerbanimo workers run in the API process because no dedicated Render worker service exists. Cerbanimo `render.yaml` sets `DATABASE_URL generateValue`, while backend `server.js` requires `POSTGRES_URL`, `GEMINI_API_KEY`, and `BACKEND_URL`; `boss.js` accepts either `POSTGRES_URL` or `DATABASE_URL`.
+
+## 11. Packet 003 Golden Conversation Delta
+
+Evidence basis: Kamiya current branch; Cerbanimo PR #145 at `091f7ee`.
+
+```mermaid
+sequenceDiagram
+  participant Browser as Kamiya browser
+  participant KApi as Kamiya API
+  participant CApi as Cerbanimo /api/v1
+  participant Worker as Cerbanimo project-bootstrap worker
+  Browser->>KApi: POST /api/chat/turn natural quest
+  KApi->>KApi: route planning + derive draft
+  KApi->>CApi: POST /api/v1/actions/preview projects.bootstrap
+  CApi-->>KApi: previewed action + requestId
+  KApi-->>Browser: preview card + safe action id
+  Browser->>KApi: confirm
+  KApi->>CApi: POST /api/v1/actions/:id/confirm
+  CApi->>Worker: queue workflow
+  KApi->>CApi: GET /api/v1/actions/:id
+  Browser->>KApi: POST /api/actions/hydrate until terminal
+  KApi->>CApi: GET /api/v1/actions/:id
+  Worker-->>CApi: project, task graph, active tasks
+  KApi-->>Browser: project card + active root task cards
+```
+
+The browser stores only safe resumable identifiers in session state. The user token from the Auth0 bridge is kept in `sessionStorage`, not `localStorage`, and is never rendered into cards or URLs.
+
+The old direct project path is deprecated for the golden flow:
+
+- no `POST /projects/create`;
+- no `POST /projects/auto-generate`;
+- no `/platform` call.
+
+The deterministic browser contract uses a local stateful Cerbanimo fixture so production Auth0, production databases, Render URLs, and live Gemini are not touched. The real-stack integration spec is present but skipped until Cerbanimo has an isolated e2e database and deterministic bootstrap provider.

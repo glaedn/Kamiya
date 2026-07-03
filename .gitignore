@@ -15,6 +15,7 @@ coverage/
 qa-*.png
 playwright-report/
 test-results/
+artifacts/golden-conversation/
 
 # OS/editor noise.
 .DS_Store
