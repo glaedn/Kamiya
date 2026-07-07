@@ -61,6 +61,8 @@ All clients should render the same card schema:
 - `quest_summary`
 - `search_results`
 - `action_preview`
+- `workflow_progress`
+- `workflow_failure`
 - `help`
 
 Card actions can be converted into web clicks, Discord buttons, Slack block actions, or Google Chat cards.
@@ -84,6 +86,67 @@ Every modifying action is represented as:
 ```
 
 Executions only occur after user confirmation.
+
+## Golden Project Bootstrap
+
+For project creation, Kamiya now uses Cerbanimo `/api/v1` action endpoints exclusively.
+
+Canonical sequence:
+
+```text
+POST /api/v1/actions/preview
+POST /api/v1/actions/:id/confirm
+GET  /api/v1/actions/:id
+POST /api/v1/actions/:id/cancel
+POST /api/v1/actions/:id/retry
+GET  /api/v1/actions
+```
+
+The preview intent is:
+
+```json
+{
+  "functionName": "projects.bootstrap",
+  "arguments": {
+    "name": "Build a Democratic Digital Economy",
+    "description": "Design and implement...",
+    "outcomeStatement": "A working platform...",
+    "dueDate": "2027-01-02",
+    "tags": ["cooperative economics"],
+    "generationMode": "plan_then_tasks"
+  }
+}
+```
+
+Kamiya treats client session state as a resumable cache only. The persisted Cerbanimo action/workflow detail is authoritative for status, project IDs, tasks, active tasks, retryability, and failures.
+
+Supported workflow states:
+
+- `queued`
+- `running`
+- `retry_wait`
+- `blocked`
+- `failed`
+- `completed`
+- `cancelled`
+
+Rendered bootstrap stages:
+
+- `validateInput`
+- `generateProjectPlan`
+- `generateTaskGraph`
+- `validateTaskGraph`
+- `persistProjectGraph`
+- `activateRootTasks`
+- `finalizeAction`
+
+Golden Conversation v1 verification covers this contract through:
+
+- `npm run test:e2e:contract`: deterministic browser contract against a stateful local Cerbanimo fixture.
+- `npm run test:e2e:integration`: real Kamiya React and Express, real Cerbanimo `/api/v1`, isolated PostgreSQL, real pg-boss worker, deterministic provider at the external generation seam.
+- `npm run test:e2e:failure`: timeout retry, invalid graph block, cancel-before-persist, network interruption, duplicate confirmation, missing auth, and cross-user hydration denial.
+
+The real-stack profile asserts that the golden project path does not call `/platform`, `/projects/create`, or `/projects/auto-generate`.
 
 ## Phase 3 Automation Contract
 

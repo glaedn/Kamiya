@@ -161,3 +161,19 @@ Consequences: Auth bridge settings must be treated as launch-critical configurat
 Repository evidence: Kamiya@69adfd2: [src/lib/authBridge.ts](../../src/lib/authBridge.ts); Cerbanimo@render-deploy ce5eca1: `src/pages/AuthBridge.jsx`, `src/App.jsx` routes `/auth/bridge/start` and `/auth/bridge/callback`.
 
 Follow-up work: Auth0 popup bridge and permission introspection packet.
+
+## ADR-011
+
+Date: 2026-07-02
+
+Decision: Kamiya Golden Conversation v1 uses Cerbanimo `/api/v1/actions` and `projects.bootstrap` as the only project-creation path.
+
+Status: accepted
+
+Rationale: The durable action/workflow API preserves preview, explicit consent, retry/cancel state, refresh recovery, audit events, and active-task delivery without splitting project creation and task generation across legacy routes.
+
+Consequences: Kamiya may cache safe action identifiers in session state, but Cerbanimo action detail is authoritative. The legacy direct `/projects/create` plus `/projects/auto-generate` path is deprecated for project creation from Kamiya.
+
+Repository evidence: Kamiya current branch: [server/services/cerbanimoClient.ts](../../server/services/cerbanimoClient.ts), [server/services/chatService.ts](../../server/services/chatService.ts), [e2e/golden-conversation.contract.spec.ts](../../e2e/golden-conversation.contract.spec.ts); Cerbanimo PR #145 `091f7ee`.
+
+Follow-up work: Enable real-stack e2e with isolated Cerbanimo database and deterministic bootstrap generator, then implement task automation classification.

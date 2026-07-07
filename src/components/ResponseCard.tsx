@@ -15,6 +15,7 @@ import type { CardAction, ResponseCard as ResponseCardType } from "../../shared/
 interface ResponseCardProps {
   card: ResponseCardType;
   onAction: (action: CardAction) => void;
+  isBusy?: boolean;
 }
 
 const cardIcons = {
@@ -33,10 +34,12 @@ const cardIcons = {
   community: Sparkles,
   profile: CheckCircle2,
   approval: ShieldCheck,
-  timeline: BarChart3
+  timeline: BarChart3,
+  workflow_progress: Workflow,
+  workflow_failure: ShieldCheck
 };
 
-export function ResponseCard({ card, onAction }: ResponseCardProps) {
+export function ResponseCard({ card, onAction, isBusy = false }: ResponseCardProps) {
   const Icon = cardIcons[card.kind] ?? Sparkles;
 
   return (
@@ -83,6 +86,8 @@ export function ResponseCard({ card, onAction }: ResponseCardProps) {
               key={action.id}
               className={action.style === "primary" ? "primary" : action.style === "danger" ? "danger" : "secondary"}
               type="button"
+              disabled={isBusy && /confirm|retry|cancel/i.test(action.id)}
+              aria-label={action.label}
               onClick={() => onAction(action)}
             >
               {action.label}

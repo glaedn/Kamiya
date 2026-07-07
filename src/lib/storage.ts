@@ -23,12 +23,12 @@ export function saveAuth(auth: KamiyaAuthContext): void {
 }
 
 export function loadSession(): KamiyaSessionState {
-  const raw = localStorage.getItem(sessionKey);
+  const raw = sessionStorage.getItem(sessionKey);
   return raw ? JSON.parse(raw) : {};
 }
 
 export function saveSession(session: KamiyaSessionState): void {
-  localStorage.setItem(sessionKey, JSON.stringify(session));
+  sessionStorage.setItem(sessionKey, JSON.stringify(sanitizeSession(session)));
 }
 
 function sanitizeAuth(auth: KamiyaAuthContext): KamiyaAuthContext {
@@ -36,4 +36,31 @@ function sanitizeAuth(auth: KamiyaAuthContext): KamiyaAuthContext {
   delete safeAuth.cerbanimoToken;
   delete safeAuth.cerbanimoApiUrl;
   return safeAuth;
+}
+
+function sanitizeSession(session: KamiyaSessionState): KamiyaSessionState {
+  return {
+    chatId: session.chatId,
+    chatName: session.chatName,
+    pendingAction: session.pendingAction
+      ? {
+          ...session.pendingAction,
+          payload: {
+            name: session.pendingAction.payload.name,
+            dueDate: session.pendingAction.payload.dueDate,
+            tags: session.pendingAction.payload.tags,
+            generationMode: session.pendingAction.payload.generationMode
+          }
+        }
+      : undefined,
+    planningDraft: session.planningDraft,
+    planningDeadlinePrompted: session.planningDeadlinePrompted,
+    mode: session.mode,
+    lastProjectAction: undefined,
+    actionHistory: session.actionHistory?.slice(0, 5),
+    activeAction: session.activeAction,
+    e2eScenario: session.e2eScenario,
+    e2eRunId: session.e2eRunId,
+    e2eControlDir: session.e2eControlDir
+  };
 }

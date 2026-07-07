@@ -14,6 +14,28 @@ Cerbanimo stores projects, tasks, communities, rewards, memory, statistics, and 
 - Interactive response cards for projects, tasks, search, statistics, and approvals.
 - Cerbanimo API client boundary with mock-safe development behavior.
 
+## Golden Conversation v1
+
+Kamiya's project-creation golden path uses Cerbanimo's durable `/api/v1/actions` contract:
+
+```text
+POST /api/v1/actions/preview
+POST /api/v1/actions/:id/confirm
+GET  /api/v1/actions/:id
+POST /api/v1/actions/:id/cancel
+POST /api/v1/actions/:id/retry
+GET  /api/v1/actions
+```
+
+The canonical function is `projects.bootstrap`. Kamiya owns the conversation, preview rendering, explicit confirmation, progress polling, refresh recovery, and result cards. Cerbanimo owns the persisted action, workflow, project plan generation, task graph validation, project/task persistence, activation, retries, and audit history.
+
+Golden Conversation v1 now passes both profiles:
+
+- Deterministic contract profile: local stateful Cerbanimo fixture, desktop/mobile browser checks, no production services.
+- Isolated real-stack profile: real Kamiya React app, real Kamiya Express API, real Cerbanimo `/api/v1`, isolated PostgreSQL database, real pg-boss worker, deterministic provider at the external generation seam only.
+
+The older direct project creation plus `/projects/auto-generate` sequence is deprecated for Kamiya's golden project flow.
+
 ## Quick Start
 
 ```bash
@@ -36,6 +58,7 @@ Copy `.env.example` to `.env` and configure:
 - `VITE_CERBANIMO_ORIGIN`: Cerbanimo frontend origin that hosts `/auth/bridge/start`.
 - `VITE_CERBANIMO_API_BASE`: Cerbanimo API base used for user-scoped Auth0 token calls.
 - `KAMIYA_ALLOWED_ORIGIN`: web client origin for CORS.
+- `KAMIYA_CERBANIMO_TIMEOUT_MS`: optional server-side timeout for Cerbanimo API requests.
 
 For popup login, Cerbanimo must allow Kamiya's browser origin in its auth bridge settings and Auth0 callback settings. See `docs/cerbanimo-platform-requirements.md` for the platform-side work.
 
@@ -53,3 +76,23 @@ Web / Discord / Slack
 Kamiya does not own Cerbanimo business logic. It owns conversation state, prompt orchestration, previews, confirmations, and client-specific rendering.
 
 See `docs/cerbanimo-platform-requirements.md` for the Cerbanimo APIs and core platform features needed next.
+
+## Browser Tests
+
+```bash
+npm run test:e2e:contract
+npm run test:e2e:integration
+npm run test:e2e:failure
+npm run test:e2e
+npm run test:e2e:headed
+```
+
+The contract suite starts a local stateful Cerbanimo fixture and never contacts production hosts. The real-stack suites start a Windows-compatible local process group through `e2e/real-stack/start-real-stack.ts`.
+
+Real-stack safety rules:
+
+- The launcher creates a unique PostgreSQL database whose name contains `e2e`.
+- Database drop/create refuses targets without `e2e` or `test`, and refuses production-like names.
+- Cerbanimo deterministic bootstrap mode refuses startup unless `NODE_ENV=test`, `CERBANIMO_E2E_MODE=true`, and the database target contains `e2e` or `test`.
+- The launcher clears live Gemini keys for the test process and uses scoped E2E API tokens only.
+- Real-stack artifacts are written under `artifacts/golden-conversation/`, `playwright-report-real-stack/`, and `test-results-real-stack/`; those paths are gitignored.

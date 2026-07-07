@@ -1,20 +1,44 @@
-import type { ActionExecutionRecord, ActionPreview, PlanningDraft, ResponseCard } from "../../shared/types";
+import type {
+  ActionExecutionRecord,
+  ActionPreview,
+  CerbanimoTask,
+  PlanningDraft,
+  ProjectBootstrapActionDetail,
+  ResponseCard
+} from "../../shared/types";
 import { agentModes } from "./modeService";
 
 export function actionPreviewCard(action: ActionPreview): ResponseCard {
+  const tags = Array.isArray(action.payload.tags) ? action.payload.tags.map(String) : [];
+  const dueDate = action.payload.dueDate ?? action.payload.due_date;
+  const projectName = String(action.payload.name ?? action.title.replace(/^Create project:\s*/i, ""));
+  const description = String(action.payload.description ?? "");
+  const outcome = String(action.payload.outcomeStatement ?? "");
+  const durableActionId = action.cerbanimoActionUuid ?? action.cerbanimoActionId;
+  const actionId = durableActionId ?? action.id;
+
   return {
     id: `card-${action.id}`,
     kind: "action_preview",
-    title: action.title,
+    title: `Create project: ${projectName}`,
     subtitle: `${action.risk.toUpperCase()} risk${action.destructive ? " destructive" : ""}`,
-    body: action.summary,
+    body: [
+      description,
+      outcome ? `Outcome: ${outcome}` : "",
+      "After confirmation, Cerbanimo will generate a project plan, create and validate a task graph, persist the project atomically, and activate the first available tasks."
+    ].filter(Boolean).join("\n\n"),
     metadata: {
+      status: action.cerbanimoActionId ? "previewed in Cerbanimo" : "local preview",
+      dueDate: String(dueDate ?? "No deadline"),
+      tags,
       permissions: action.requiredPermissions,
+      confirmationStatus: "awaiting explicit confirmation",
+      actionId,
       createdAt: action.createdAt
     },
     actions: [
-      { id: "confirm", label: "Confirm", style: "primary", actionId: action.id },
-      { id: "cancel", label: "Cancel", style: "secondary", command: "cancel" }
+      { id: "confirm", label: "Confirm quest creation", style: "primary", actionId: action.cerbanimoActionId ?? action.id },
+      { id: "cancel", label: "Cancel quest creation", style: "secondary", command: durableActionId ? `cancel action ${actionId}` : "cancel", actionId }
     ]
   };
 }
@@ -48,6 +72,119 @@ export function projectProcessingCard(data: Record<string, unknown>): ResponseCa
       projectId: String(data.projectId ?? ""),
       elapsedMs: String(data.elapsedMs ?? 0)
     }
+  };
+}
+
+export function workflowProgressCard(detail: ProjectBootstrapActionDetail, requestId?: string): ResponseCard {
+  const workflowStatus = String(detail.workflow?.status ?? detail.action.status ?? "previewed");
+  const completedSteps = new Set(detail.steps.filter((step) => step.status === "completed" || step.status === "skipped").map((step) => step.step_name));
+  const runningStep = detail.steps.find((step) => step.status === "running")?.step_name;
+  const failedStep = detail.steps.find((step) => step.status === "failed")?.step_name;
+  const currentStage = failedStep ?? runningStep ?? nextIncompleteStage(completedSteps) ?? "finalizeAction";
+
+  return {
+    id: `workflow-${detail.action.id}`,
+    kind: "workflow_progress",
+    title: "Quest creation progress",
+    subtitle: humanWorkflowStatus(workflowStatus),
+    body: workflowStatus === "retry_wait"
+      ? "Cerbanimo hit a retryable problem. Your confirmed quest is safe and no duplicate project was created; Cerbanimo will retry automatically."
+      : "Cerbanimo is preparing the project through the durable bootstrap workflow.",
+    metadata: {
+      actionId: String(detail.action.action_uuid ?? detail.action.id),
+      workflowRunId: detail.workflow?.id ? String(detail.workflow.id) : "",
+      currentStage: stageLabel(currentStage),
+      attempt: String(detail.workflow?.attempt_count ?? 0),
+      requestId: requestId ?? ""
+    },
+    items: bootstrapStages.map((stage) => ({
+      id: stage.name,
+      title: stage.label,
+      status: stage.name === currentStage && !completedSteps.has(stage.name)
+        ? workflowStatus === "retry_wait" ? "retrying" : "in progress"
+        : completedSteps.has(stage.name) ? "complete" : "pending"
+    })),
+    actions: cancellableStatuses.has(workflowStatus)
+      ? [{ id: "cancel-quest", label: "Cancel quest creation", style: "secondary", command: `cancel action ${detail.action.action_uuid ?? detail.action.id}` }]
+      : undefined
+  };
+}
+
+export function workflowFailureCard(detail: ProjectBootstrapActionDetail, requestId?: string): ResponseCard {
+  const error = normalizeError(detail.error ?? detail.workflow?.last_error ?? detail.action.execution_result);
+  const status = String(detail.workflow?.status ?? detail.action.status);
+  const retryable = Boolean(error.retryable || status === "retry_wait" || status === "blocked" || status === "failed");
+
+  return {
+    id: `workflow-failure-${detail.action.id}`,
+    kind: "workflow_failure",
+    title: status === "cancelled" ? "Quest creation cancelled" : "Quest creation needs attention",
+    subtitle: humanWorkflowStatus(status),
+    body: status === "cancelled"
+      ? "Quest creation was cancelled before the project was committed."
+      : error.message || "Cerbanimo could not finish preparing this quest.",
+    metadata: {
+      code: String(error.code ?? status),
+      failedStage: String(error.stage ?? failedStage(detail) ?? "unknown"),
+      retryable: retryable ? "yes" : "no",
+      attempt: String(detail.workflow?.attempt_count ?? 0),
+      actionId: String(detail.action.action_uuid ?? detail.action.id),
+      requestId: requestId ?? ""
+    },
+    actions: [
+      ...(retryable ? [{ id: "retry-quest", label: "Retry quest creation", style: "primary" as const, command: `retry action ${detail.action.action_uuid ?? detail.action.id}` }] : []),
+      ...(cancellableStatuses.has(status) ? [{ id: "cancel-quest", label: "Cancel quest creation", style: "secondary" as const, command: `cancel action ${detail.action.action_uuid ?? detail.action.id}` }] : [])
+    ]
+  };
+}
+
+export function projectResultCards(detail: ProjectBootstrapActionDetail): ResponseCard[] {
+  const project = detail.project;
+  if (!project) return [workflowProgressCard(detail)];
+
+  const projectTitle = String(project.name ?? project.title ?? "Created project");
+  const dueDate = project.due_date ?? project.dueDate;
+  return [
+    {
+      id: `project-${project.id}`,
+      kind: "project",
+      title: projectTitle,
+      subtitle: "Created in Cerbanimo",
+      body: String(project.description ?? ""),
+      metadata: {
+        dueDate: dueDate ? String(dueDate) : "No deadline",
+        totalTasks: detail.tasks.length,
+        activeTasks: detail.activeTasks.length
+      },
+      actions: [
+        { id: "open-created-project", label: "Open created project", style: "primary", command: `/open /projects/${project.id}` },
+        { id: "explore-active-tasks", label: "Explore active tasks", style: "secondary", command: `explore active tasks ${project.id}` }
+      ]
+    },
+    activeTaskCard(detail.activeTasks)
+  ];
+}
+
+export function activeTaskCard(tasks: CerbanimoTask[]): ResponseCard {
+  return {
+    id: crypto.randomUUID(),
+    kind: "task",
+    title: "Active root tasks",
+    subtitle: `${tasks.length} active task${tasks.length === 1 ? "" : "s"}`,
+    body: "These tasks are active now because their dependencies are clear.",
+    items: tasks.map((task) => ({
+      id: String(task.id),
+      title: String(task.name ?? task.title ?? "Untitled task"),
+      subtitle: String(task.description ?? task.skill_name ?? "Cerbanimo task"),
+      status: String(task.status ?? "active"),
+      metadata: {
+        skill: String(task.skill_name ?? "Unspecified"),
+        skillLevel: Number(task.skill_level ?? 0),
+        rewardTokens: Number(task.reward_tokens ?? 0),
+        dueDate: String(task.due_date ?? "none"),
+        dependencies: dependencySummary(task.dependencies)
+      }
+    }))
   };
 }
 
@@ -282,4 +419,62 @@ function compactMetadata(metadata: NonNullable<ResponseCard["metadata"]>): Respo
     return value !== undefined && value !== null && String(value).trim().length > 0;
   });
   return entries.length ? Object.fromEntries(entries) : undefined;
+}
+
+const bootstrapStages = [
+  { name: "validateInput", label: "Validating your quest" },
+  { name: "generateProjectPlan", label: "Designing the project plan" },
+  { name: "generateTaskGraph", label: "Mapping the task graph" },
+  { name: "validateTaskGraph", label: "Checking dependencies and dates" },
+  { name: "persistProjectGraph", label: "Committing the project" },
+  { name: "activateRootTasks", label: "Activating the first tasks" },
+  { name: "finalizeAction", label: "Preparing your quest dashboard" }
+];
+
+const cancellableStatuses = new Set(["previewed", "confirmed", "queued", "running", "retry_wait"]);
+
+function nextIncompleteStage(completedSteps: Set<string>): string | undefined {
+  return bootstrapStages.find((stage) => !completedSteps.has(stage.name))?.name;
+}
+
+function stageLabel(stageName: string): string {
+  return bootstrapStages.find((stage) => stage.name === stageName)?.label ?? stageName;
+}
+
+function humanWorkflowStatus(status: string): string {
+  const labels: Record<string, string> = {
+    previewed: "Awaiting confirmation",
+    confirmed: "Queued",
+    queued: "Queued",
+    running: "In progress",
+    retry_wait: "Retrying",
+    blocked: "Blocked",
+    failed: "Failed",
+    completed: "Completed",
+    executed: "Completed",
+    cancelled: "Cancelled"
+  };
+  return labels[status] ?? "State needs reconciliation";
+}
+
+function failedStage(detail: ProjectBootstrapActionDetail): string | undefined {
+  return detail.steps.find((step) => step.status === "failed")?.step_name;
+}
+
+function normalizeError(error: unknown): { code?: string | number; message?: string; stage?: string; retryable?: boolean } {
+  if (error && typeof error === "object" && !Array.isArray(error)) {
+    const record = error as Record<string, unknown>;
+    return {
+      code: typeof record.code === "string" || typeof record.code === "number" ? record.code : undefined,
+      message: typeof record.message === "string" ? record.message : undefined,
+      stage: typeof record.stage === "string" ? record.stage : undefined,
+      retryable: typeof record.retryable === "boolean" ? record.retryable : undefined
+    };
+  }
+  return { message: typeof error === "string" ? error : undefined };
+}
+
+function dependencySummary(value: unknown): string {
+  if (!Array.isArray(value) || value.length === 0) return "none";
+  return `${value.length} dependenc${value.length === 1 ? "y" : "ies"}`;
 }

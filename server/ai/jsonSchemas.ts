@@ -98,7 +98,8 @@ export const planningResponseSchema = {
         audience: { type: "string" },
         timeline: { type: "string" },
         constraints: { type: "string" },
-        successCriteria: { type: "string" }
+        successCriteria: { type: "string" },
+        tags: { type: "array", items: { type: "string" } }
       }
     },
     ready_to_create: { type: "boolean" }

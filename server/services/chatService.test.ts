@@ -24,16 +24,14 @@ describe("handleChatTurn", () => {
   });
 
   it("continues an active planning draft even when the next message is conversational", async () => {
-    const auth = {
-      isLoggedIn: true,
-      displayName: "Glaed",
-      permissions: ["projects:create"]
-    };
+    mockPreviewFetch();
+    const auth = cerbanimoAuth();
     const first = await handleChatTurn({
       message: "/create project for a youth coding club",
       history: [],
       session: {},
-      auth
+      auth,
+      channel: "sdk"
     });
 
     const second = await handleChatTurn({
@@ -41,26 +39,49 @@ describe("handleChatTurn", () => {
         "The mission is to help middle school students learn web development, the audience is middle school students, timeline is next month, success means ten students complete a small website",
       history: [],
       session: first.session,
-      auth
+      auth,
+      channel: "sdk"
     });
 
-    expect(second.message.content).toContain("Please confirm");
+    expect(second.message.content).toContain("Please review");
     expect(second.session.pendingAction?.kind).toBe("create_project");
+    expect(second.session.pendingAction?.cerbanimoActionId).toBe("42");
     expect(second.session.planningDraft?.mission).toContain("help middle school students");
   });
 
+  it("explains that protected previews require login instead of mocking success", async () => {
+    const auth = {
+      isLoggedIn: true,
+      displayName: "Glaed",
+      permissions: ["projects:create"]
+    };
+
+    const response = await handleChatTurn({
+      message:
+        "The mission is to help middle school students learn web development, the audience is middle school students, timeline is next month, success means ten students complete a small website",
+      history: [],
+      session: {
+        planningDraft: {
+          title: "Youth Coding Club"
+        }
+      },
+      auth
+    });
+
+    expect(response.message.content).toContain("cannot prepare the Cerbanimo action preview");
+    expect(response.session.pendingAction).toBeUndefined();
+  });
+
   it("previews project creation once Cerbanimo-required fields are present", async () => {
+    mockPreviewFetch();
+    const auth = cerbanimoAuth();
     const response = await handleChatTurn({
       message:
         "/create project named Neighborhood Garden, description is Build raised beds and organize volunteers, outcome is residents have fresh produce",
       history: [],
       session: {},
-      auth: {
-        isLoggedIn: true,
-        userId: "auth0|user-123",
-        displayName: "Glaed",
-        permissions: ["projects:create"]
-      }
+      auth,
+      channel: "sdk"
     });
 
     expect(response.message.content).toContain("Do you want to set a deadline");
@@ -70,16 +91,13 @@ describe("handleChatTurn", () => {
       message: "no deadline",
       history: [],
       session: response.session,
-      auth: {
-        isLoggedIn: true,
-        userId: "auth0|user-123",
-        displayName: "Glaed",
-        permissions: ["projects:create"]
-      }
+      auth,
+      channel: "sdk"
     });
 
-    expect(preview.message.content).toContain("Please confirm");
+    expect(preview.message.content).toContain("Please review");
     expect(preview.session.pendingAction?.kind).toBe("create_project");
+    expect(preview.session.activeAction?.status).toBe("previewed");
     expect(preview.session.pendingAction?.payload).toMatchObject({
       name: "Neighborhood Garden",
       description: "Build raised beds and organize volunteers",
@@ -88,6 +106,7 @@ describe("handleChatTurn", () => {
   });
 
   it("keeps generated Cerbanimo project names within the live database limit", async () => {
+    mockPreviewFetch();
     const response = await handleChatTurn({
       message:
         "/create project named " +
@@ -95,42 +114,36 @@ describe("handleChatTurn", () => {
         ", description is Build a focused local initiative, outcome is the local initiative is operating",
       history: [],
       session: { planningDeadlinePrompted: true },
-      auth: {
-        isLoggedIn: true,
-        userId: "auth0|user-123",
-        displayName: "Glaed",
-        permissions: ["projects:create"]
-      }
+      auth: cerbanimoAuth(),
+      channel: "sdk"
     });
 
     expect(String(response.session.pendingAction?.payload.name)).toHaveLength(100);
   });
 
   it("converts natural language deadline responses into strict Cerbanimo due dates", async () => {
-    const auth = {
-      isLoggedIn: true,
-      userId: "auth0|user-123",
-      displayName: "Glaed",
-      permissions: ["projects:create"]
-    };
+    mockPreviewFetch();
+    const auth = cerbanimoAuth();
     const first = await handleChatTurn({
       message:
         "/create project named Neighborhood Garden, description is Build raised beds and organize volunteers, outcome is residents have fresh produce",
       history: [],
       session: {},
-      auth
+      auth,
+      channel: "sdk"
     });
 
     const preview = await handleChatTurn({
       message: "next month",
       history: [],
       session: first.session,
-      auth
+      auth,
+      channel: "sdk"
     });
 
-    expect(preview.message.content).toContain("Please confirm");
-    expect(preview.session.pendingAction?.payload.due_date).toMatch(/^\d{4}-\d{2}-\d{2}$/);
-    expect(preview.session.pendingAction?.payload.due_date).toBe(lastDayOfNextMonth());
+    expect(preview.message.content).toContain("Please review");
+    expect(preview.session.pendingAction?.payload.dueDate).toMatch(/^\d{4}-\d{2}-\d{2}$/);
+    expect(preview.session.pendingAction?.payload.dueDate).toBe(lastDayOfNextMonth());
   });
 
   it("summarizes the created project and active tasks after confirmation", async () => {
@@ -138,24 +151,24 @@ describe("handleChatTurn", () => {
       .fn()
       .mockResolvedValueOnce({
         ok: true,
+        headers: new Headers({ "x-request-id": "req-preview" }),
         json: async () => ({
-          id: 42,
-          name: "Watertown Weekly MtG Meetup",
-          description: "Create a local Watertown weekly get together",
-          outcomeStatement: "Build a local community around weekly MtG meetups"
+          ok: true,
+          data: actionRow("previewed"),
+          error: null,
+          requestId: "req-preview"
         })
       })
       .mockResolvedValueOnce({
         ok: true,
-        json: async () => ({ success: true })
+        status: 202,
+        headers: new Headers({ "x-request-id": "req-confirm" }),
+        json: async () => ({ ok: true, data: actionRow("confirmed"), error: null, requestId: "req-confirm" })
       })
       .mockResolvedValueOnce({
         ok: true,
-        json: async () => ({ tasks: [{ id: 1, name: "Reserve a table", status: "active", reward_tokens: 10 }] })
-      })
-      .mockResolvedValue({
-        ok: true,
-        json: async () => ({ chat: { id: 1, name: "Watertown Weekly MtG Meetup", messages: [], session: {} } })
+        headers: new Headers({ "x-request-id": "req-detail" }),
+        json: async () => ({ ok: true, data: completedDetail(), error: null, requestId: "req-detail" })
       });
     vi.stubGlobal("fetch", fetchMock);
 
@@ -188,11 +201,88 @@ describe("handleChatTurn", () => {
       channel: "sdk"
     });
 
-    expect(response.message.content).toContain("Watertown Weekly MtG Meetup");
-    expect(response.message.content).toContain("Active tasks ready now");
-    expect(response.message.content).toContain("Reserve a table");
+    expect(response.message.content).toContain("Your quest is live");
+    expect(JSON.stringify(response.message.cards)).toContain("Watertown Weekly MtG Meetup");
+    expect(response.message.cards?.some((card) => card.title.includes("Active root tasks"))).toBe(true);
+    expect(JSON.stringify(response.message.cards)).toContain("Reserve a table");
   });
 });
+
+function cerbanimoAuth() {
+  return {
+    isLoggedIn: true,
+    userId: "auth0|user-123",
+    displayName: "Glaed",
+    cerbanimoApiUrl: "http://localhost:4000",
+    cerbanimoToken: "token",
+    permissions: ["projects:create", "actions:write", "actions:read"]
+  };
+}
+
+function mockPreviewFetch() {
+  vi.stubGlobal(
+    "fetch",
+    vi.fn().mockResolvedValue({
+      ok: true,
+      status: 201,
+      headers: new Headers({ "x-request-id": "req-preview" }),
+      json: async () => ({
+        ok: true,
+        data: actionRow("previewed"),
+        error: null,
+        requestId: "req-preview"
+      })
+    })
+  );
+}
+
+function actionRow(status: string) {
+  return {
+    id: 42,
+    action_uuid: "action-uuid-42",
+    status,
+    risk_level: "low",
+    intent_json: { functionName: "projects.bootstrap" },
+    preview_payload: {},
+    execution_result: null,
+    related_project_id: status === "executed" ? 100 : null,
+    created_at: "2026-07-02T12:00:00.000Z"
+  };
+}
+
+function completedDetail() {
+  return {
+    action: actionRow("executed"),
+    workflow: {
+      id: "wf-1",
+      status: "completed",
+      workflow_type: "projects.bootstrap",
+      action_id: 42,
+      related_project_id: 100,
+      attempt_count: 1
+    },
+    steps: [
+      "validateInput",
+      "generateProjectPlan",
+      "generateTaskGraph",
+      "validateTaskGraph",
+      "persistProjectGraph",
+      "activateRootTasks",
+      "finalizeAction"
+    ].map((step_name, id) => ({ id, step_name, status: "completed" })),
+    project: {
+      id: 100,
+      name: "Watertown Weekly MtG Meetup",
+      description: "Create a local Watertown weekly get together",
+      due_date: "2026-08-01"
+    },
+    tasks: [{ id: 1, name: "Reserve a table", description: "Find a venue.", status: "active", reward_tokens: 10, skill_name: "Coordination", skill_level: 1, dependencies: [] }],
+    activeTasks: [{ id: 1, name: "Reserve a table", description: "Find a venue.", status: "active", reward_tokens: 10, skill_name: "Coordination", skill_level: 1, dependencies: [] }],
+    terminal: true,
+    result: null,
+    error: null
+  };
+}
 
 function lastDayOfNextMonth(): string {
   const now = new Date();

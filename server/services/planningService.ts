@@ -5,8 +5,17 @@ import { buildPlanningPrompt } from "../ai/prompts";
 
 const requiredFields: Array<keyof PlanningDraft> = ["title", "mission", "desiredOutcome"];
 
+const democraticEconomyFixture = {
+  title: "Build a Democratic Digital Economy",
+  mission:
+    "Design and implement a digital economic system grounded in voluntary cooperation, non-hierarchical collaboration, and democratically governed group constitutions.",
+  desiredOutcome:
+    "A working platform where groups can coordinate economic activity without fixed hierarchy and transparently adopt and revise their own constitutions.",
+  tags: ["cooperative economics", "democratic governance", "mutual aid", "software platform"]
+};
+
 export async function analyzePlanning(message: string, currentDraft?: PlanningDraft): Promise<PlanningAnalysis> {
-  const serverNow = new Date();
+  const serverNow = serverNowForPlanning();
   const localAnalysis = analyzePlanningLocally(message, currentDraft, serverNow);
   const aiAnalysis = await generateGeminiJson<PlanningAnalysis>({
     prompt: buildPlanningPrompt(message, currentDraft, serverNow),
@@ -22,17 +31,34 @@ export async function analyzePlanning(message: string, currentDraft?: PlanningDr
   });
 }
 
+function serverNowForPlanning(): Date {
+  const configured = process.env.KAMIYA_E2E_NOW || process.env.KAMIYA_SERVER_NOW;
+  if (configured) {
+    const parsed = new Date(configured);
+    if (!Number.isNaN(parsed.getTime())) return parsed;
+  }
+  return new Date();
+}
+
 function analyzePlanningLocally(message: string, currentDraft?: PlanningDraft, serverNow = new Date()): PlanningAnalysis {
   const draft: PlanningDraft = { ...(currentDraft ?? {}) };
   const clean = message.replace(/^\/(plan|create)\s*/i, "").trim();
   const explicitTitle = extractTitle(clean);
   const explicitMission = extractMission(clean);
   const explicitDescription = extractDescription(clean);
+  const democraticEconomy = isDemocraticEconomyQuest(clean);
 
-  if (explicitTitle) draft.title = explicitTitle;
+  if (democraticEconomy) {
+    draft.title = democraticEconomyFixture.title;
+    draft.mission = democraticEconomyFixture.mission;
+    draft.desiredOutcome = democraticEconomyFixture.desiredOutcome;
+    draft.tags = democraticEconomyFixture.tags;
+  }
+
+  if (explicitTitle && !democraticEconomy) draft.title = explicitTitle;
   if (!draft.title && clean) draft.title = titleFromMessage(clean);
-  if (explicitDescription) draft.mission = explicitDescription;
-  if (!explicitDescription && explicitMission) draft.mission = explicitMission;
+  if (explicitDescription && !democraticEconomy) draft.mission = explicitDescription;
+  if (!explicitDescription && explicitMission && !democraticEconomy) draft.mission = explicitMission;
   if (!draft.mission && clean) draft.mission = clean;
   if (!draft.desiredOutcome) draft.desiredOutcome = extractOutcome(clean) ?? inferOutcome(clean);
   if (!draft.timeline) draft.timeline = extractTimeline(clean, serverNow);
@@ -94,6 +120,8 @@ function mergeDrafts(localDraft: PlanningDraft, aiDraft?: PlanningDraft): Planni
 }
 
 function titleFromMessage(message: string): string {
+  if (isDemocraticEconomyQuest(message)) return democraticEconomyFixture.title;
+
   const localCommunityMatch = message.match(/\blocal\s+([A-Za-z][\w\s'-]{1,50}?)\s+(?:weekly\s+)?(?:get together|meetup|meeting|club|group)\s+(?:around|for|about)\s+(.+?)(?:\s+(?:starting|in|within|by|so)\b|$)/i);
   if (localCommunityMatch?.[1] && localCommunityMatch?.[2]) {
     return toTitle(`${localCommunityMatch[1].trim()} Weekly ${shortTopic(localCommunityMatch[2])} meetup`);
@@ -161,7 +189,7 @@ function inferOutcome(message: string): string | undefined {
 }
 
 function extractTimeline(message: string, serverNow: Date): string | undefined {
-  const timelineMatch = message.match(/\b(today|tomorrow|this week|next week|this month|next month|this quarter|next quarter|this year|next year|(?:starting\s+)?in\s+\d+\s+(?:days?|weeks?|months?)|within\s+\d+\s+(?:days?|weeks?|months?)|by\s+[^,.]+|\d{4}-\d{2}-\d{2})\b/i);
+  const timelineMatch = message.match(/\b(today|tomorrow|this week|next week|this month|next month|this quarter|next quarter|this year|next year|over\s+the\s+next\s+\d+\s+(?:days?|weeks?|months?)|(?:starting\s+)?in\s+\d+\s+(?:days?|weeks?|months?)|within\s+\d+\s+(?:days?|weeks?|months?)|by\s+[^,.]+|\d{4}-\d{2}-\d{2})\b/i);
   return timelineMatch?.[1] ? resolveTimeline(timelineMatch[1].trim(), serverNow) : undefined;
 }
 
@@ -181,7 +209,7 @@ function resolveTimeline(value: string, serverNow: Date): string | undefined {
   if (lower === "this year") return `${start.getFullYear()}-12-31`;
   if (lower === "next year") return `${start.getFullYear() + 1}-12-31`;
 
-  const relativeMatch = lower.match(/^(?:starting\s+)?(?:in|within)\s+(\d+)\s+(days?|weeks?|months?)$/);
+  const relativeMatch = lower.match(/^(?:over\s+the\s+next|starting\s+in|in|within)\s+(\d+)\s+(days?|weeks?|months?)$/);
   if (relativeMatch?.[1] && relativeMatch?.[2]) {
     const amount = Number(relativeMatch[1]);
     if (relativeMatch[2].startsWith("day")) return formatDate(addDays(start, amount));
@@ -194,6 +222,16 @@ function resolveTimeline(value: string, serverNow: Date): string | undefined {
 
   const parsed = parseDateLike(byMatch[1], start);
   return parsed ? formatDate(parsed) : value;
+}
+
+function isDemocraticEconomyQuest(message: string): boolean {
+  const lower = message.toLowerCase();
+  return (
+    lower.includes("digital economic system") &&
+    (lower.includes("anarchic principles") || lower.includes("without fixed hierarchies") || lower.includes("non-hierarchical")) &&
+    lower.includes("democratically") &&
+    lower.includes("constitutions")
+  );
 }
 
 function parseDateLike(value: string, serverNow: Date): Date | undefined {
@@ -283,7 +321,8 @@ function questionForField(field: keyof PlanningDraft): string {
     audience: "Who is this for or who should be involved?",
     timeline: "What timeline or deadline should I plan around?",
     constraints: "Are there any constraints I should respect?",
-    successCriteria: "How will we know the quest succeeded?"
+    successCriteria: "How will we know the quest succeeded?",
+    tags: "Which topics or tags should Cerbanimo attach?"
   };
   return questions[field];
 }

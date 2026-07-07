@@ -5,13 +5,15 @@ import { slashCommands } from "../shared/commands";
 import { CommandMenu } from "./components/CommandMenu";
 import { MessageBubble } from "./components/MessageBubble";
 import { SettingsPanel } from "./components/SettingsPanel";
-import { listSavedChats, loadSavedChat, makeUserMessage, sendChatTurn } from "./lib/kamiyaApi";
-import { loadAuth, saveAuth } from "./lib/storage";
-import { attachCerbanimoAuth, clearCerbanimoSession, hydrateAuthFromCerbanimoSession, startCerbanimoLogin } from "./lib/authBridge";
+import { hydrateAction, listSavedChats, loadSavedChat, makeUserMessage, sendChatTurn } from "./lib/kamiyaApi";
+import { loadAuth, loadSession, saveAuth, saveSession } from "./lib/storage";
+import { attachCerbanimoAuth, bootstrapLocalE2EAuthFromQuery, clearCerbanimoSession, hydrateAuthFromCerbanimoSession, startCerbanimoLogin } from "./lib/authBridge";
+
+bootstrapLocalE2EAuthFromQuery();
 
 export default function App() {
   const [auth, setAuth] = useState<KamiyaAuthContext>(() => hydrateAuthFromCerbanimoSession(loadAuth()));
-  const [session, setSession] = useState<KamiyaSessionState>({});
+  const [session, setSession] = useState<KamiyaSessionState>(() => loadSession());
   const [messages, setMessages] = useState<ChatMessage[]>(() => [introMessage(hydrateAuthFromCerbanimoSession(loadAuth()).isLoggedIn)]);
   const [savedChats, setSavedChats] = useState<KamiyaSavedChatSummary[]>([]);
   const [input, setInput] = useState("");
@@ -20,13 +22,29 @@ export default function App() {
   const [loginError, setLoginError] = useState<string | undefined>();
   const [settingsOpen, setSettingsOpen] = useState(false);
   const endRef = useRef<HTMLDivElement | null>(null);
+  const sessionRef = useRef(session);
+  const authRef = useRef(auth);
+  const hydrationMessageIdRef = useRef<string | undefined>();
+  const networkNoticeRef = useRef(false);
+  const isSendingRef = useRef(false);
 
   const statusLabel = auth.isLoggedIn ? auth.displayName || "Connected" : "Logged out";
   const quickCommands = useMemo(() => slashCommands.slice(0, 6), []);
+  const activeActionSignature = useMemo(() => {
+    const active = session.activeAction;
+    if (!active) return "";
+    return `${active.actionUuid ?? active.actionId}:${active.status}`;
+  }, [session.activeAction]);
 
   useEffect(() => {
     saveAuth(auth);
+    authRef.current = auth;
   }, [auth]);
+
+  useEffect(() => {
+    sessionRef.current = session;
+    saveSession(session);
+  }, [session]);
 
   useEffect(() => {
     setMessages((current) => {
@@ -47,14 +65,82 @@ export default function App() {
     }
   }, [auth]);
 
+  useEffect(() => {
+    const active = sessionRef.current.activeAction;
+    if (!auth.isLoggedIn || !active || (!shouldPollStatus(active.status) && !isTerminalStatus(active.status))) return undefined;
+    const initialActionId = active.actionUuid ?? active.actionId;
+
+    let stopped = false;
+    let timer: number | undefined;
+    let inFlight = false;
+    let delay = 900;
+    let controller: AbortController | undefined;
+
+    async function poll(): Promise<void> {
+      if (stopped || inFlight) return;
+      inFlight = true;
+      controller = new AbortController();
+
+      try {
+        const latestSession = sessionRef.current;
+        const latestActive = latestSession.activeAction;
+        const actionId = latestActive?.actionUuid ?? latestActive?.actionId ?? initialActionId;
+        const response = await hydrateAction(attachCerbanimoAuth(authRef.current), latestSession, actionId, controller.signal);
+        networkNoticeRef.current = false;
+        setSession(response.session);
+        mergeHydrationMessage(response.message);
+
+        const nextStatus = response.session.activeAction?.status;
+        if (nextStatus && isTerminalStatus(nextStatus)) return;
+        delay = Math.min(3000, Math.round(delay * 1.35));
+      } catch (error) {
+        if (!stopped && !(error instanceof DOMException && error.name === "AbortError")) {
+          if (!networkNoticeRef.current) {
+            networkNoticeRef.current = true;
+            setMessages((current) => [
+              ...current,
+              {
+                id: crypto.randomUUID(),
+                role: "assistant",
+                content: "The connection to Cerbanimo was interrupted. I will keep this quest recoverable and continue hydrating the same action.",
+                createdAt: new Date().toISOString()
+              }
+            ]);
+          }
+          delay = Math.min(3000, delay + 500);
+        }
+      } finally {
+        inFlight = false;
+        if (!stopped && shouldPollStatus(sessionRef.current.activeAction?.status)) {
+          timer = window.setTimeout(() => void poll(), delay);
+        }
+      }
+    }
+
+    void poll();
+
+    function onVisibilityChange(): void {
+      if (document.visibilityState === "visible") void poll();
+    }
+
+    document.addEventListener("visibilitychange", onVisibilityChange);
+    return () => {
+      stopped = true;
+      if (timer) window.clearTimeout(timer);
+      controller?.abort();
+      document.removeEventListener("visibilitychange", onVisibilityChange);
+    };
+  }, [activeActionSignature, auth.isLoggedIn]);
+
   async function submitMessage(value = input) {
     const trimmed = value.trim();
-    if (!trimmed || isSending) return;
+    if (!trimmed || isSendingRef.current) return;
 
     const userMessage = makeUserMessage(trimmed);
     const nextHistory = [...messages, userMessage];
     setMessages(nextHistory);
     setInput("");
+    isSendingRef.current = true;
     setIsSending(true);
 
     try {
@@ -65,6 +151,9 @@ export default function App() {
         auth: attachCerbanimoAuth(auth)
       });
       setSession(response.session);
+      if (shouldPollStatus(response.session.activeAction?.status)) {
+        hydrationMessageIdRef.current = response.message.id;
+      }
       setMessages((current) => [...current, response.message]);
       void refreshSavedChats();
     } catch (error) {
@@ -79,6 +168,7 @@ export default function App() {
         }
       ]);
     } finally {
+      isSendingRef.current = false;
       setIsSending(false);
     }
   }
@@ -89,6 +179,7 @@ export default function App() {
   }
 
   function handleCardAction(action: CardAction) {
+    if (isSendingRef.current) return;
     if (action.id === "confirm") {
       void submitMessage("confirm");
       return;
@@ -128,6 +219,7 @@ export default function App() {
   function startNewChat(useCurrentAuth = true) {
     const isLoggedIn = useCurrentAuth ? auth.isLoggedIn : false;
     setSession({});
+    hydrationMessageIdRef.current = undefined;
     setMessages([introMessage(isLoggedIn)]);
     setInput("");
   }
@@ -163,6 +255,26 @@ export default function App() {
         }
       ]);
     }
+  }
+
+  function mergeHydrationMessage(message: ChatMessage) {
+    const existingId = hydrationMessageIdRef.current;
+    if (!existingId) {
+      hydrationMessageIdRef.current = message.id;
+      setMessages((current) => [...current, message]);
+      return;
+    }
+
+    setMessages((current) => {
+      const index = current.findIndex((item) => item.id === existingId);
+      if (index === -1) {
+        hydrationMessageIdRef.current = message.id;
+        return [...current, message];
+      }
+      const next = [...current];
+      next[index] = { ...message, id: existingId };
+      return next;
+    });
   }
 
   return (
@@ -210,7 +322,7 @@ export default function App() {
 
         <div className="messages" aria-live="polite">
           {messages.map((message) => (
-            <MessageBubble key={message.id} message={message} onCardAction={handleCardAction} />
+            <MessageBubble key={message.id} message={message} onCardAction={handleCardAction} isBusy={isSending} />
           ))}
           {isSending ? (
             <div className="message assistant">
@@ -235,6 +347,7 @@ export default function App() {
         <form className="composer" onSubmit={handleSubmit}>
           <CommandMenu input={input} onPick={setInput} />
           <textarea
+            aria-label="Message Kamiya"
             value={input}
             onChange={(event) => setInput(event.target.value)}
             onKeyDown={(event) => {
@@ -270,7 +383,7 @@ export default function App() {
               <strong>{session.pendingAction.title}</strong>
               <p>{session.pendingAction.summary}</p>
               <button className="primary wide" type="button" onClick={() => void submitMessage("confirm")}>
-                Confirm action
+                Confirm quest creation
               </button>
             </div>
           ) : (
@@ -331,6 +444,14 @@ export default function App() {
       />
     </main>
   );
+}
+
+function isTerminalStatus(status?: string): boolean {
+  return status === "completed" || status === "executed" || status === "blocked" || status === "failed" || status === "cancelled";
+}
+
+function shouldPollStatus(status?: string): boolean {
+  return status === "confirmed" || status === "queued" || status === "running" || status === "retry_wait";
 }
 
 function introMessage(isLoggedIn: boolean): ChatMessage {

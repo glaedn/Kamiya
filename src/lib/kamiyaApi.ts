@@ -1,4 +1,4 @@
-import type { ChatMessage, ChatTurnRequest, ChatTurnResponse, KamiyaAuthContext, KamiyaSavedChat, KamiyaSavedChatSummary } from "../../shared/types";
+import type { ChatMessage, ChatTurnRequest, ChatTurnResponse, KamiyaAuthContext, KamiyaSavedChat, KamiyaSavedChatSummary, KamiyaSessionState } from "../../shared/types";
 
 export async function sendChatTurn(request: ChatTurnRequest): Promise<ChatTurnResponse> {
   const response = await fetch("/api/chat/turn", {
@@ -54,4 +54,20 @@ export async function loadSavedChat(auth: KamiyaAuthContext, chatId: number): Pr
 
   const data = (await response.json()) as { chat: KamiyaSavedChat };
   return data.chat;
+}
+
+export async function hydrateAction(auth: KamiyaAuthContext, session: KamiyaSessionState, actionId: string, signal?: AbortSignal): Promise<ChatTurnResponse> {
+  const response = await fetch("/api/actions/hydrate", {
+    method: "POST",
+    headers: { "content-type": "application/json" },
+    body: JSON.stringify({ auth, session, actionId }),
+    signal
+  });
+
+  if (!response.ok) {
+    const body = await response.json().catch(() => ({}));
+    throw new Error(body.error ?? "Failed to hydrate Cerbanimo action");
+  }
+
+  return response.json();
 }

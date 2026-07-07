@@ -39,7 +39,11 @@ export function routeIntentLocally(message: string): RoutedIntent {
     };
   }
 
-  if (/\b(plan|create project|new project|start project|create a project|quest|project idea|turn .* into|roadmap|milestone)\b/.test(lower)) {
+  if (
+    /\b(plan|create project|new project|start project|create a project|quest|project idea|turn .* into|roadmap|milestone)\b/.test(lower) ||
+    /\b(i\s+want\s+to|we\s+want\s+to|help\s+me)\s+(create|build|design|launch|start|make)\b/.test(lower) ||
+    /\b(create|build|design|launch|start)\s+(a|an|the)\s+.+\b(system|platform|community|project|program|initiative|tool)\b/.test(lower)
+  ) {
     return {
       reasoning: "User appears to be refining or creating a project.",
       intent: "planning",
