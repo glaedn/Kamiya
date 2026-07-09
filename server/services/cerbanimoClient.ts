@@ -200,6 +200,11 @@ const automationRunSchema = z.object({
   status: z.string(),
   input: z.record(z.unknown()).optional(),
   result: z.record(z.unknown()).optional().nullable(),
+  allowedActions: z.object({
+    cancel: z.boolean().optional(),
+    retry: z.boolean().optional(),
+    startNewRun: z.boolean().optional()
+  }).optional(),
   logs: z.array(z.object({
     level: z.string().optional(),
     message: z.string().optional(),
@@ -417,7 +422,7 @@ export class CerbanimoClient {
           };
         }
 
-        const run = await this.getAutomationRun(runId);
+        const run = await this.hydrateAutomationRunAfterConfirm(runId);
         return run.ok
           ? { ok: true, data: { action: confirmed.data, automationRun: run.data }, requestId: run.requestId ?? confirmed.requestId }
           : { ok: true, data: { action: confirmed.data, automationRunError: run.error }, requestId: confirmed.requestId };
@@ -729,6 +734,25 @@ export class CerbanimoClient {
     return Boolean(this.apiUrl && this.auth.isLoggedIn && this.auth.cerbanimoToken);
   }
 
+  private async hydrateAutomationRunAfterConfirm(runId: string | number): Promise<CerbanimoResult<AutomationRun>> {
+    const pollMs = Number(process.env.KAMIYA_AUTOMATION_CONFIRM_POLL_MS || 0);
+    if (pollMs <= 0) return this.getAutomationRun(runId);
+
+    const terminalStatuses = new Set(["completed", "failed", "blocked", "cancelled"]);
+    const deadline = Date.now() + pollMs;
+    let lastResult: CerbanimoResult<AutomationRun> | undefined;
+
+    while (Date.now() <= deadline) {
+      lastResult = await this.getAutomationRun(runId);
+      if (!lastResult.ok || terminalStatuses.has(String(lastResult.data?.status))) {
+        return lastResult;
+      }
+      await delay(300);
+    }
+
+    return lastResult ?? this.getAutomationRun(runId);
+  }
+
   private missingUserAuthResult(actionDescription: string): CerbanimoResult<never> {
     return {
       ok: false,
@@ -811,4 +835,8 @@ function automationRunIdFromExecutionResult(value: unknown): number | string | u
   if (!isRecord(value)) return undefined;
   const runId = value.automationRunId ?? value.automation_run_id;
   return typeof runId === "number" || typeof runId === "string" ? runId : undefined;
+}
+
+function delay(ms: number): Promise<void> {
+  return new Promise((resolve) => setTimeout(resolve, ms));
 }

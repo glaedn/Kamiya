@@ -332,8 +332,8 @@ export function automationRunResultCard(run: AutomationRun): ResponseCard {
   const checks = Array.isArray(result.checks) ? result.checks : [];
   const runStatus = String(run.status ?? "queued");
   const actionId = run.action_id ? String(run.action_id) : undefined;
-  const retryable = ["blocked", "failed", "retry_wait"].includes(runStatus);
-  const cancellable = ["queued", "running", "retry_wait", "blocked", "failed"].includes(runStatus);
+  const retryable = Boolean(run.allowedActions?.retry);
+  const cancellable = Boolean(run.allowedActions?.cancel);
 
   return {
     id: `automation-run-${run.run_uuid ?? run.id}`,

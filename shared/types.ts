@@ -373,6 +373,11 @@ export interface AutomationRun {
   status: string;
   input?: Record<string, unknown>;
   result?: AutomationRunResult | Record<string, unknown> | null;
+  allowedActions?: {
+    cancel?: boolean;
+    retry?: boolean;
+    startNewRun?: boolean;
+  };
   logs?: Array<{ level?: string; message?: string; payload?: unknown; created_at?: string | null }>;
   created_at?: string | null;
   started_at?: string | null;

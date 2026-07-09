@@ -5,7 +5,15 @@ import tseslint from "typescript-eslint";
 
 export default [
   {
-    ignores: ["dist/**", "node_modules/**"]
+    ignores: [
+      "artifacts/**",
+      "dist/**",
+      "node_modules/**",
+      "playwright-report/**",
+      "playwright-report-real-stack/**",
+      "test-results/**",
+      "test-results-real-stack/**"
+    ]
   },
   js.configs.recommended,
   ...tseslint.configs.recommended,
