@@ -88,6 +88,8 @@ export type CardKind =
   | "automation"
   | "action_queue"
   | "validation_report"
+  | "review"
+  | "review_assignment"
   | "mode"
   | "integration"
   | "approval"
@@ -418,6 +420,78 @@ export interface TaskEvidenceContext {
     cancel?: boolean;
     confirm?: boolean;
   };
+}
+
+export interface ReviewAllowedActions {
+  acceptAssignment?: boolean;
+  bless?: boolean;
+  requestChanges?: boolean;
+  reject?: boolean;
+  recuse?: boolean;
+  seal?: boolean;
+}
+
+export interface TaskReviewRound {
+  id: number | string;
+  round_uuid?: string | null;
+  task_id?: number | string;
+  bundle_id?: number | string;
+  validation_result_id?: number | string;
+  status: string;
+  stage?: string;
+  risk_tier?: "standard" | "sensitive" | "high_stakes" | string;
+  policy_version?: string;
+  peer_approvals_required?: number;
+  peer_approvals_received?: number;
+  peer_deadline_at?: string | null;
+  peer_gate_method?: string | null;
+  pm_deadline_at?: string | null;
+  pm_gate_method?: string | null;
+  shortage_flag?: boolean;
+  accepted_at?: string | null;
+  settlement_status?: string | null;
+}
+
+export interface TaskReviewAssignment {
+  id: number | string;
+  assignment_uuid?: string | null;
+  review_round_id?: number | string;
+  reviewer_user_id?: number | string;
+  reviewer_role: "validation_reviewer" | "peer_reviewer" | "pm_reviewer" | string;
+  status: string;
+  assigned_at?: string | null;
+  accepted_at?: string | null;
+  expires_at?: string | null;
+  risk_tier?: string;
+  task?: { name?: string; projectName?: string | null };
+}
+
+export interface TaskReviewDecision {
+  id: number | string;
+  decision_uuid?: string | null;
+  review_round_id?: number | string;
+  assignment_id?: number | string;
+  reviewer_user_id?: number | string;
+  decision: string;
+  reason?: string | null;
+  requirement_findings?: Array<Record<string, unknown>>;
+  decision_source?: string;
+  created_at?: string | null;
+}
+
+export interface TaskReviewContext {
+  reviewFeature?: { enabled?: boolean; policyVersion?: string; manifestVersionRequired?: string };
+  status?: string;
+  taskId?: number | string;
+  round?: TaskReviewRound;
+  assignment?: TaskReviewAssignment | null;
+  assignments?: TaskReviewAssignment[];
+  decisions?: TaskReviewDecision[];
+  task?: { id?: number | string; name?: string; description?: string; status?: string };
+  validation?: Record<string, unknown> | null;
+  evidence?: TaskEvidenceContext | null;
+  copy?: string;
+  allowedActions?: ReviewAllowedActions;
 }
 
 export interface AutomationRunResult {

@@ -224,6 +224,40 @@ describe("CerbanimoClient /api/v1 action contract", () => {
     expect(fetchMock.mock.calls[1][0]).toBe("http://localhost:4000/api/v1/tasks/203/evidence/bundles/bundle-501/supersede");
   });
 
+  it("loads review assignments and accepts an assignment through v1 review routes", async () => {
+    const fetchMock = vi
+      .fn()
+      .mockResolvedValueOnce(jsonResponse({ ok: true, data: reviewContext(), error: null, requestId: "req-reviews" }))
+      .mockResolvedValueOnce(jsonResponse({ ok: true, data: reviewContext({ assignmentStatus: "accepted", allowedActions: { bless: true, requestChanges: true, reject: true, recuse: true } }), error: null, requestId: "req-accept" }));
+    vi.stubGlobal("fetch", fetchMock);
+
+    const client = new CerbanimoClient(auth);
+    const queue = await client.listReviewAssignments();
+    const accepted = await client.acceptReviewAssignment("assignment-801");
+
+    expect(queue.ok).toBe(true);
+    expect(queue.data?.assignments?.[0].reviewer_role).toBe("peer_reviewer");
+    expect(accepted.data?.allowedActions?.bless).toBe(true);
+    expect(fetchMock.mock.calls[0][0]).toBe("http://localhost:4000/api/v1/reviews/assignments");
+    expect(fetchMock.mock.calls[1][0]).toBe("http://localhost:4000/api/v1/reviews/assignments/assignment-801/accept");
+  });
+
+  it("submits peer and PM review decisions without inferring permissions locally", async () => {
+    const fetchMock = vi
+      .fn()
+      .mockResolvedValueOnce(jsonResponse({ ok: true, data: reviewContext({ peerReceived: 3, status: "pm_review_open" }), error: null, requestId: "req-bless" }))
+      .mockResolvedValueOnce(jsonResponse({ ok: true, data: reviewContext({ peerReceived: 3, status: "accepted_pending_settlement", settlement: "pending" }), error: null, requestId: "req-seal" }));
+    vi.stubGlobal("fetch", fetchMock);
+
+    const client = new CerbanimoClient(auth);
+    await client.decidePeerReview("round-701", { assignmentId: "assignment-801", decision: "bless" });
+    const sealed = await client.decidePmReview("round-701", { assignmentId: "assignment-901", decision: "seal" });
+
+    expect(sealed.data?.round?.status).toBe("accepted_pending_settlement");
+    expect(fetchMock.mock.calls[0][0]).toBe("http://localhost:4000/api/v1/review-rounds/round-701/peer-decisions");
+    expect(fetchMock.mock.calls[1][0]).toBe("http://localhost:4000/api/v1/review-rounds/round-701/pm-decisions");
+  });
+
   it("confirms evidence submissions through actions instead of legacy submit routes", async () => {
     const fetchMock = vi
       .fn()
@@ -475,6 +509,40 @@ function taskEvidenceContext() {
       items: []
     }],
     validations: []
+  };
+}
+
+function reviewContext(options: { assignmentStatus?: string; allowedActions?: Record<string, boolean>; peerReceived?: number; status?: string; settlement?: string } = {}) {
+  return {
+    reviewFeature: { enabled: true, policyVersion: "task-review-v1", manifestVersionRequired: "evidence-manifest-v2" },
+    round: {
+      id: 701,
+      round_uuid: "round-701",
+      task_id: 203,
+      bundle_id: 501,
+      status: options.status ?? "peer_review_open",
+      stage: options.status === "accepted_pending_settlement" ? "accepted" : "peer_review",
+      risk_tier: "standard",
+      peer_approvals_required: 3,
+      peer_approvals_received: options.peerReceived ?? 1,
+      settlement_status: options.settlement ?? null
+    },
+    assignments: [{
+      id: 801,
+      assignment_uuid: "assignment-801",
+      review_round_id: 701,
+      reviewer_role: "peer_reviewer",
+      status: options.assignmentStatus ?? "offered"
+    }],
+    assignment: {
+      id: 801,
+      assignment_uuid: "assignment-801",
+      review_round_id: 701,
+      reviewer_role: "peer_reviewer",
+      status: options.assignmentStatus ?? "offered"
+    },
+    decisions: [],
+    allowedActions: options.allowedActions ?? { acceptAssignment: true, recuse: true }
   };
 }
 

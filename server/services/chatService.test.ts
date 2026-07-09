@@ -364,6 +364,55 @@ describe("handleChatTurn", () => {
     expect(JSON.stringify(response.message.cards)).toContain("Superseding evidence draft");
     expect(fetchMock.mock.calls[0][0]).toBe("http://localhost:4000/api/v1/tasks/203/evidence/bundles/bundle-501/supersede");
   });
+
+  it("loads review queue and opens an assignment without raw evidence before acceptance", async () => {
+    const fetchMock = vi
+      .fn()
+      .mockResolvedValueOnce(jsonResponse({ ok: true, data: reviewContext(), error: null, requestId: "req-review-queue" }))
+      .mockResolvedValueOnce(jsonResponse({ ok: true, data: reviewContext(), error: null, requestId: "req-open-review" }));
+    vi.stubGlobal("fetch", fetchMock);
+
+    const queue = await handleChatTurn({
+      message: "/reviews",
+      history: [],
+      session: {},
+      auth: cerbanimoAuth(),
+      channel: "sdk"
+    });
+    const opened = await handleChatTurn({
+      message: "open review assignment-801",
+      history: [],
+      session: {},
+      auth: cerbanimoAuth(),
+      channel: "sdk"
+    });
+
+    expect(queue.message.content).toContain("review queue");
+    expect(opened.message.content).toContain("Raw evidence remains hidden");
+    expect(JSON.stringify(opened.message.cards)).not.toContain("blobStorageKey");
+    expect(fetchMock.mock.calls.map((call) => String(call[0]))).toEqual([
+      "http://localhost:4000/api/v1/reviews/assignments",
+      "http://localhost:4000/api/v1/reviews/assignments/assignment-801"
+    ]);
+  });
+
+  it("accepts, Blesses, and seals review assignments with settlement-pending copy", async () => {
+    const fetchMock = vi
+      .fn()
+      .mockResolvedValueOnce(jsonResponse({ ok: true, data: reviewContext({ assignmentStatus: "accepted", allowedActions: { bless: true, requestChanges: true, reject: true, recuse: true } }), error: null, requestId: "req-accept" }))
+      .mockResolvedValueOnce(jsonResponse({ ok: true, data: reviewContext({ peerReceived: 3, status: "pm_review_open" }), error: null, requestId: "req-bless" }))
+      .mockResolvedValueOnce(jsonResponse({ ok: true, data: reviewContext({ peerReceived: 3, status: "accepted_pending_settlement", settlement: "pending", copy: "The contribution has passed validation, peer review, and project review. Completion settlement is still pending." }), error: null, requestId: "req-seal" }));
+    vi.stubGlobal("fetch", fetchMock);
+
+    const accepted = await handleChatTurn({ message: "accept review assignment-801", history: [], session: {}, auth: cerbanimoAuth(), channel: "sdk" });
+    const blessed = await handleChatTurn({ message: "bless review round-701 assignment-801", history: [], session: {}, auth: cerbanimoAuth(), channel: "sdk" });
+    const sealed = await handleChatTurn({ message: "seal review round-701 assignment-901", history: [], session: {}, auth: cerbanimoAuth(), channel: "sdk" });
+
+    expect(accepted.message.content).toContain("accepted");
+    expect(blessed.message.content).toContain("Blessing recorded");
+    expect(sealed.message.content).toContain("accepted pending settlement");
+    expect(JSON.stringify(sealed.message.cards)).toContain("Completion settlement is still pending");
+  });
 });
 
 function cerbanimoAuth() {
@@ -597,6 +646,42 @@ function taskEvidenceContext(overrides: Record<string, unknown> = {}) {
     bundle: evidenceBundle(),
     validations: [],
     ...overrides
+  };
+}
+
+function reviewContext(options: { assignmentStatus?: string; allowedActions?: Record<string, boolean>; peerReceived?: number; status?: string; settlement?: string; copy?: string } = {}) {
+  return {
+    reviewFeature: { enabled: true, policyVersion: "task-review-v1", manifestVersionRequired: "evidence-manifest-v2" },
+    round: {
+      id: 701,
+      round_uuid: "round-701",
+      task_id: 203,
+      bundle_id: 501,
+      status: options.status ?? "peer_review_open",
+      stage: options.status === "accepted_pending_settlement" ? "accepted" : "peer_review",
+      risk_tier: "standard",
+      peer_approvals_required: 3,
+      peer_approvals_received: options.peerReceived ?? 1,
+      settlement_status: options.settlement ?? null
+    },
+    assignments: [{
+      id: 801,
+      assignment_uuid: "assignment-801",
+      review_round_id: 701,
+      reviewer_role: "peer_reviewer",
+      status: options.assignmentStatus ?? "offered",
+      task: { name: "Review task", projectName: "Project" }
+    }],
+    assignment: {
+      id: 801,
+      assignment_uuid: "assignment-801",
+      review_round_id: 701,
+      reviewer_role: "peer_reviewer",
+      status: options.assignmentStatus ?? "offered"
+    },
+    decisions: [],
+    copy: options.copy,
+    allowedActions: options.allowedActions ?? { acceptAssignment: true, recuse: true }
   };
 }
 

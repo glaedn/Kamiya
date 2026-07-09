@@ -12,7 +12,8 @@ import type {
   KamiyaSessionState,
   ProjectBootstrapActionDetail,
   TaskEvidenceContext,
-  TaskAutomationContext
+  TaskAutomationContext,
+  TaskReviewContext
 } from "../../shared/types";
 
 const apiEnvelopeSchema = z.object({
@@ -267,6 +268,87 @@ const taskEvidenceContextSchema = z.object({
     cancel: z.boolean().optional(),
     confirm: z.boolean().optional()
   }).partial().optional()
+}).passthrough();
+
+const reviewAllowedActionsSchema = z.object({
+  acceptAssignment: z.boolean().optional(),
+  bless: z.boolean().optional(),
+  requestChanges: z.boolean().optional(),
+  reject: z.boolean().optional(),
+  recuse: z.boolean().optional(),
+  seal: z.boolean().optional()
+}).partial().optional();
+
+const taskReviewRoundSchema = z.object({
+  id: z.union([z.number(), z.string()]),
+  round_uuid: z.string().optional().nullable(),
+  task_id: z.union([z.number(), z.string()]).optional(),
+  bundle_id: z.union([z.number(), z.string()]).optional(),
+  validation_result_id: z.union([z.number(), z.string()]).optional(),
+  status: z.string(),
+  stage: z.string().optional(),
+  risk_tier: z.string().optional(),
+  policy_version: z.string().optional(),
+  peer_approvals_required: z.number().optional(),
+  peer_approvals_received: z.number().optional(),
+  peer_deadline_at: z.string().optional().nullable(),
+  peer_gate_method: z.string().optional().nullable(),
+  pm_deadline_at: z.string().optional().nullable(),
+  pm_gate_method: z.string().optional().nullable(),
+  shortage_flag: z.boolean().optional(),
+  accepted_at: z.string().optional().nullable(),
+  settlement_status: z.string().optional().nullable()
+}).passthrough();
+
+const taskReviewAssignmentSchema = z.object({
+  id: z.union([z.number(), z.string()]),
+  assignment_uuid: z.string().optional().nullable(),
+  review_round_id: z.union([z.number(), z.string()]).optional(),
+  reviewer_user_id: z.union([z.number(), z.string()]).optional(),
+  reviewer_role: z.string(),
+  status: z.string(),
+  assigned_at: z.string().optional().nullable(),
+  accepted_at: z.string().optional().nullable(),
+  expires_at: z.string().optional().nullable(),
+  risk_tier: z.string().optional(),
+  task: z.object({ name: z.string().optional(), projectName: z.string().optional().nullable() }).optional()
+}).passthrough();
+
+const taskReviewDecisionSchema = z.object({
+  id: z.union([z.number(), z.string()]),
+  decision_uuid: z.string().optional().nullable(),
+  review_round_id: z.union([z.number(), z.string()]).optional(),
+  assignment_id: z.union([z.number(), z.string()]).optional(),
+  reviewer_user_id: z.union([z.number(), z.string()]).optional(),
+  decision: z.string(),
+  reason: z.string().optional().nullable(),
+  requirement_findings: z.array(z.record(z.unknown())).optional().default([]),
+  decision_source: z.string().optional(),
+  created_at: z.string().optional().nullable()
+}).passthrough();
+
+const taskReviewContextSchema = z.object({
+  reviewFeature: z.object({
+    enabled: z.boolean().optional(),
+    policyVersion: z.string().optional(),
+    manifestVersionRequired: z.string().optional()
+  }).optional(),
+  status: z.string().optional(),
+  taskId: z.union([z.number(), z.string()]).optional(),
+  round: taskReviewRoundSchema.optional(),
+  assignment: taskReviewAssignmentSchema.optional().nullable(),
+  assignments: z.array(taskReviewAssignmentSchema).optional().default([]),
+  decisions: z.array(taskReviewDecisionSchema).optional().default([]),
+  task: z.object({
+    id: z.union([z.number(), z.string()]).optional(),
+    name: z.string().optional(),
+    description: z.string().optional(),
+    status: z.string().optional()
+  }).optional(),
+  validation: z.record(z.unknown()).optional().nullable(),
+  evidence: taskEvidenceContextSchema.optional().nullable(),
+  copy: z.string().optional(),
+  allowedActions: reviewAllowedActionsSchema
 }).passthrough();
 
 const automationRunSchema = z.object({
@@ -539,6 +621,96 @@ export class CerbanimoClient {
       input,
       taskEvidenceContextSchema
     ) as Promise<CerbanimoResult<TaskEvidenceContext>>;
+  }
+
+  async taskReviewStatus(taskId: string | number): Promise<CerbanimoResult<TaskReviewContext>> {
+    return this.requestV1(
+      `/tasks/${encodeURIComponent(String(taskId))}/review-status`,
+      "GET",
+      undefined,
+      taskReviewContextSchema
+    ) as Promise<CerbanimoResult<TaskReviewContext>>;
+  }
+
+  async listReviewAssignments(): Promise<CerbanimoResult<TaskReviewContext>> {
+    return this.requestV1(
+      "/reviews/assignments",
+      "GET",
+      undefined,
+      taskReviewContextSchema
+    ) as Promise<CerbanimoResult<TaskReviewContext>>;
+  }
+
+  async getReviewAssignment(assignmentId: string | number): Promise<CerbanimoResult<TaskReviewContext>> {
+    return this.requestV1(
+      `/reviews/assignments/${encodeURIComponent(String(assignmentId))}`,
+      "GET",
+      undefined,
+      taskReviewContextSchema
+    ) as Promise<CerbanimoResult<TaskReviewContext>>;
+  }
+
+  async acceptReviewAssignment(assignmentId: string | number): Promise<CerbanimoResult<TaskReviewContext>> {
+    return this.requestV1(
+      `/reviews/assignments/${encodeURIComponent(String(assignmentId))}/accept`,
+      "POST",
+      {},
+      taskReviewContextSchema
+    ) as Promise<CerbanimoResult<TaskReviewContext>>;
+  }
+
+  async declineReviewAssignment(assignmentId: string | number, reason?: string): Promise<CerbanimoResult<TaskReviewContext>> {
+    return this.requestV1(
+      `/reviews/assignments/${encodeURIComponent(String(assignmentId))}/decline`,
+      "POST",
+      { reason },
+      taskReviewContextSchema
+    ) as Promise<CerbanimoResult<TaskReviewContext>>;
+  }
+
+  async recuseReviewAssignment(assignmentId: string | number, reason: string): Promise<CerbanimoResult<TaskReviewContext>> {
+    return this.requestV1(
+      `/reviews/assignments/${encodeURIComponent(String(assignmentId))}/recuse`,
+      "POST",
+      { reason },
+      taskReviewContextSchema
+    ) as Promise<CerbanimoResult<TaskReviewContext>>;
+  }
+
+  async decideValidationReview(
+    reviewId: string | number,
+    input: { decision: string; reason?: string; requirementFindings?: Array<Record<string, unknown>> }
+  ): Promise<CerbanimoResult<TaskReviewContext>> {
+    return this.requestV1(
+      `/validation-reviews/${encodeURIComponent(String(reviewId))}/decision`,
+      "POST",
+      input,
+      taskReviewContextSchema
+    ) as Promise<CerbanimoResult<TaskReviewContext>>;
+  }
+
+  async decidePeerReview(
+    roundId: string | number,
+    input: { assignmentId?: string | number; decision: string; reason?: string; requirementFindings?: Array<Record<string, unknown>> }
+  ): Promise<CerbanimoResult<TaskReviewContext>> {
+    return this.requestV1(
+      `/review-rounds/${encodeURIComponent(String(roundId))}/peer-decisions`,
+      "POST",
+      input,
+      taskReviewContextSchema
+    ) as Promise<CerbanimoResult<TaskReviewContext>>;
+  }
+
+  async decidePmReview(
+    roundId: string | number,
+    input: { assignmentId?: string | number; decision: string; reason?: string; requirementFindings?: Array<Record<string, unknown>> }
+  ): Promise<CerbanimoResult<TaskReviewContext>> {
+    return this.requestV1(
+      `/review-rounds/${encodeURIComponent(String(roundId))}/pm-decisions`,
+      "POST",
+      input,
+      taskReviewContextSchema
+    ) as Promise<CerbanimoResult<TaskReviewContext>>;
   }
 
   async getAutomationRun(runId: string | number): Promise<CerbanimoResult<AutomationRun>> {

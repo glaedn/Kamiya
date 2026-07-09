@@ -38,7 +38,9 @@ const cardIcons = {
   timeline: BarChart3,
   workflow_progress: Workflow,
   workflow_failure: ShieldCheck,
-  evidence: FileCheck2
+  evidence: FileCheck2,
+  review: FileCheck2,
+  review_assignment: ListChecks
 };
 
 export function ResponseCard({ card, onAction, isBusy = false }: ResponseCardProps) {

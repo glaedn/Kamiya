@@ -27,6 +27,9 @@ import {
   validationReportCard,
   modeCard,
   taskAutomationPreparationCard,
+  reviewAssignmentCard,
+  reviewAssignmentsCard,
+  reviewStatusCard,
   workflowFailureCard,
   workflowProgressCard
 } from "./cardFactory";
@@ -79,6 +82,11 @@ async function buildChatTurnResponse(request: ChatTurnRequest): Promise<ChatTurn
   const evidenceCommand = parseTaskEvidenceCommand(message);
   if (evidenceCommand) {
     return handleTaskEvidenceCommand(request, evidenceCommand);
+  }
+
+  const reviewCommand = parseReviewCommand(message);
+  if (reviewCommand) {
+    return handleReviewCommand(request, reviewCommand);
   }
 
   if (/^view required inputs\b/i.test(message) && request.session.activeAction?.actionId) {
@@ -595,6 +603,15 @@ type TaskEvidenceCommand =
   | { kind: "supersede"; taskId: string; bundleId: string }
   | { kind: "cancel"; taskId: string; bundleId: string };
 
+type ReviewCommand =
+  | { kind: "queue" }
+  | { kind: "status"; taskId: string }
+  | { kind: "open"; assignmentId: string }
+  | { kind: "accept" | "decline"; assignmentId: string; reason?: string }
+  | { kind: "recuse"; assignmentId: string; reason: string }
+  | { kind: "validation_decision"; reviewId: string; decision: string; reason?: string }
+  | { kind: "peer_decision" | "pm_decision"; roundId: string; assignmentId?: string; decision: string; reason?: string };
+
 async function handleTaskEvidenceCommand(request: ChatTurnRequest, command: TaskEvidenceCommand): Promise<ChatTurnResponse> {
   if (command.kind === "requirements") return showEvidenceRequirements(request, command.taskId);
   if (command.kind === "start") return startEvidenceSubmission(request, command.taskId);
@@ -603,6 +620,56 @@ async function handleTaskEvidenceCommand(request: ChatTurnRequest, command: Task
   if (command.kind === "supersede") return supersedeEvidenceBundle(request, command.taskId, command.bundleId);
   if (command.kind === "cancel") return cancelEvidenceBundle(request, command.taskId, command.bundleId);
   return previewEvidenceSubmission(request, command.taskId);
+}
+
+async function handleReviewCommand(request: ChatTurnRequest, command: ReviewCommand): Promise<ChatTurnResponse> {
+  const cerbanimo = new CerbanimoClient(request.auth);
+  if (command.kind === "queue") {
+    const result = await cerbanimo.listReviewAssignments();
+    if (!result.ok || !result.data) return respond(`I could not load your review queue from Cerbanimo: ${result.error}`, request.session);
+    return respond("Here is your Cerbanimo review queue.", request.session, undefined, [reviewAssignmentsCard(result.data)]);
+  }
+  if (command.kind === "status") {
+    const result = await cerbanimo.taskReviewStatus(command.taskId);
+    if (!result.ok || !result.data) return respond(`I could not load that task review status from Cerbanimo: ${result.error}`, request.session);
+    return respond(result.data.copy ?? "Cerbanimo returned the task review status.", request.session, undefined, [reviewStatusCard(result.data)]);
+  }
+  if (command.kind === "open") {
+    const result = await cerbanimo.getReviewAssignment(command.assignmentId);
+    if (!result.ok || !result.data) return respond(`I could not open that review assignment: ${result.error}`, request.session);
+    return respond("Cerbanimo returned the review assignment. Raw evidence remains hidden until the assignment is accepted.", request.session, undefined, [reviewAssignmentCard(result.data)]);
+  }
+  if (command.kind === "accept") {
+    const result = await cerbanimo.acceptReviewAssignment(command.assignmentId);
+    if (!result.ok || !result.data) return respond(`Cerbanimo could not accept that review assignment: ${result.error}`, request.session);
+    return respond("Review assignment accepted. Cerbanimo will show only the frozen evidence scoped to this review.", request.session, undefined, [reviewAssignmentCard(result.data)]);
+  }
+  if (command.kind === "decline") {
+    const result = await cerbanimo.declineReviewAssignment(command.assignmentId, command.reason);
+    if (!result.ok || !result.data) return respond(`Cerbanimo could not decline that review assignment: ${result.error}`, request.session);
+    return respond("Review assignment declined.", request.session, undefined, [reviewAssignmentCard(result.data)]);
+  }
+  if (command.kind === "recuse") {
+    const result = await cerbanimo.recuseReviewAssignment(command.assignmentId, command.reason);
+    if (!result.ok || !result.data) return respond(`Cerbanimo could not record the recusal: ${result.error}`, request.session);
+    return respond("Recusal recorded. Frozen evidence access for that assignment is closed.", request.session, undefined, [reviewAssignmentCard(result.data)]);
+  }
+  if (command.kind === "validation_decision") {
+    const result = await cerbanimo.decideValidationReview(command.reviewId, { decision: command.decision, reason: command.reason });
+    if (!result.ok || !result.data) return respond(`Cerbanimo could not record that validation decision: ${result.error}`, request.session);
+    return respond("Manual validation decision recorded. The original evidence remains immutable.", request.session, undefined, [reviewStatusCard(result.data)]);
+  }
+  if (command.kind === "peer_decision") {
+    const result = await cerbanimo.decidePeerReview(command.roundId, { assignmentId: command.assignmentId, decision: command.decision, reason: command.reason });
+    if (!result.ok || !result.data) return respond(`Cerbanimo could not record that peer decision: ${result.error}`, request.session);
+    return respond(peerDecisionCopy(command.decision), request.session, undefined, [reviewStatusCard(result.data)]);
+  }
+  if (command.kind === "pm_decision") {
+    const result = await cerbanimo.decidePmReview(command.roundId, { assignmentId: command.assignmentId, decision: command.decision, reason: command.reason });
+    if (!result.ok || !result.data) return respond(`Cerbanimo could not record that PM decision: ${result.error}`, request.session);
+    return respond(pmDecisionCopy(command.decision), request.session, undefined, [reviewStatusCard(result.data)]);
+  }
+  return respond("I could not recognize that review command.", request.session);
 }
 
 async function showEvidenceRequirements(
@@ -778,6 +845,89 @@ function parseTaskEvidenceCommand(message: string): TaskEvidenceCommand | undefi
   if (start?.[1]) return { kind: "start", taskId: start[1] };
 
   return undefined;
+}
+
+function parseReviewCommand(message: string): ReviewCommand | undefined {
+  const trimmed = message.trim();
+  if (/^\/reviews?$|^review assignments$|^review queue$/i.test(trimmed)) return { kind: "queue" };
+
+  const status = trimmed.match(/^review status\s+(\S+)$/i) ?? trimmed.match(/^task review status\s+(\S+)$/i);
+  if (status?.[1]) return { kind: "status", taskId: status[1] };
+
+  const open = trimmed.match(/^open review\s+(\S+)$/i);
+  if (open?.[1]) return { kind: "open", assignmentId: open[1] };
+
+  const accept = trimmed.match(/^accept review\s+(\S+)$/i);
+  if (accept?.[1]) return { kind: "accept", assignmentId: accept[1] };
+
+  const decline = trimmed.match(/^decline review\s+(\S+)(?:\s+reason=(.+))?$/i);
+  if (decline?.[1]) return { kind: "decline", assignmentId: decline[1], reason: decline[2] };
+
+  const recuse = trimmed.match(/^recuse review\s+(\S+)(?:\s+reason=(.+))?$/i);
+  if (recuse?.[1]) return { kind: "recuse", assignmentId: recuse[1], reason: recuse[2] ?? "Reviewer recused from Kamiya." };
+
+  const validation = trimmed.match(/^validation review\s+(\S+)\s+(accept_validation|request_more_evidence|reject_invalid_evidence|recuse)(?:\s+reason=(.+))?$/i);
+  if (validation?.[1]) return { kind: "validation_decision", reviewId: validation[1], decision: validation[2], reason: validation[3] };
+
+  const bless = trimmed.match(/^bless review\s+(\S+)(?:\s+([\s\S]+))?$/i);
+  if (bless?.[1]) {
+    const { assignmentId, reason } = splitOptionalAssignmentAndReason(bless[2]);
+    return { kind: "peer_decision", roundId: bless[1], assignmentId, decision: "bless", reason };
+  }
+
+  const requestChanges = trimmed.match(/^request review changes\s+(\S+)(?:\s+([\s\S]+))?$/i);
+  if (requestChanges?.[1]) {
+    const { assignmentId, reason } = splitOptionalAssignmentAndReason(requestChanges[2]);
+    return { kind: "peer_decision", roundId: requestChanges[1], assignmentId, decision: "request_changes", reason: reason ?? "Reviewer requested more specific evidence." };
+  }
+
+  const reject = trimmed.match(/^reject review\s+(\S+)(?:\s+([\s\S]+))?$/i);
+  if (reject?.[1]) {
+    const { assignmentId, reason } = splitOptionalAssignmentAndReason(reject[2]);
+    return { kind: "peer_decision", roundId: reject[1], assignmentId, decision: "reject", reason: reason ?? "Reviewer rejected the evidence." };
+  }
+
+  const seal = trimmed.match(/^seal review\s+(\S+)(?:\s+([\s\S]+))?$/i);
+  if (seal?.[1]) {
+    const { assignmentId, reason } = splitOptionalAssignmentAndReason(seal[2]);
+    return { kind: "pm_decision", roundId: seal[1], assignmentId, decision: "seal", reason };
+  }
+
+  const pmChanges = trimmed.match(/^pm request changes\s+(\S+)(?:\s+([\s\S]+))?$/i);
+  if (pmChanges?.[1]) {
+    const { assignmentId, reason } = splitOptionalAssignmentAndReason(pmChanges[2]);
+    return { kind: "pm_decision", roundId: pmChanges[1], assignmentId, decision: "request_changes", reason: reason ?? "Project review requested changes." };
+  }
+
+  return undefined;
+}
+
+function splitOptionalAssignmentAndReason(input?: string): { assignmentId?: string; reason?: string } {
+  const text = input?.trim();
+  if (!text) return {};
+
+  const reasonMatch = text.match(/\breason=/i);
+  const beforeReason = reasonMatch ? text.slice(0, reasonMatch.index).trim() : text;
+  const reason = reasonMatch ? text.slice((reasonMatch.index ?? 0) + reasonMatch[0].length).trim() : undefined;
+  const assignmentId = beforeReason ? beforeReason.split(/\s+/)[0] : undefined;
+  return {
+    assignmentId,
+    reason: reason || undefined
+  };
+}
+
+function peerDecisionCopy(decision: string): string {
+  if (decision === "bless") return "Blessing recorded. Kamiya will show the peer gate progress from Cerbanimo.";
+  if (decision === "request_changes") return "Changes requested. Timeout advancement is blocked for this review round.";
+  if (decision === "reject") return "Peer rejection recorded. The task is not completed and no rewards are issued.";
+  return "Peer review decision recorded.";
+}
+
+function pmDecisionCopy(decision: string): string {
+  if (decision === "seal") return "Ritual Seal recorded. The contribution is accepted pending settlement; completion and rewards wait for Packet 009.";
+  if (decision === "request_changes") return "Project review requested changes. The evidence remains immutable and the contributor can create a superseding bundle.";
+  if (decision === "reject") return "Project rejection recorded. The task remains uncompleted and no settlement occurred.";
+  return "PM review decision recorded.";
 }
 
 function taskIdFromMessageOrIntent(message: string, intent?: ChatMessage["intent"]): string | undefined {

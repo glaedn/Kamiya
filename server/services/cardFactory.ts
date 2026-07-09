@@ -8,7 +8,8 @@ import type {
   ProjectBootstrapActionDetail,
   ResponseCard,
   TaskEvidenceContext,
-  TaskAutomationContext
+  TaskAutomationContext,
+  TaskReviewContext
 } from "../../shared/types";
 import { agentModes } from "./modeService";
 
@@ -308,6 +309,117 @@ export function evidenceBundleCard(context: TaskEvidenceContext, title = "Task e
       ...(canConfirm ? [{ id: "confirm-evidence", label: "Confirm submission", style: "primary" as const, actionId }] : []),
       ...(bundle && ["needs_more_evidence", "manual_review_required"].includes(status) ? [{ id: "add-more-evidence", label: "Add more evidence", style: "secondary" as const, command: `add more evidence ${taskId} ${bundleId}` }] : []),
       ...(bundle && allowed.cancel ? [{ id: "cancel-evidence", label: "Cancel", style: "secondary" as const, command: `cancel evidence ${taskId} ${bundleId}` }] : [])
+    ]
+  };
+}
+
+export function reviewStatusCard(context: TaskReviewContext): ResponseCard {
+  const round = context.round;
+  const progress = round
+    ? `${round.peer_approvals_received ?? 0}/${round.peer_approvals_required ?? 3}`
+    : "0/3";
+  return {
+    id: `review-status-${round?.round_uuid ?? round?.id ?? context.taskId ?? crypto.randomUUID()}`,
+    kind: "review",
+    title: round ? "Task review status" : "No review round yet",
+    subtitle: round?.status ?? context.status ?? "not started",
+    body: context.copy ?? (
+      round?.status === "accepted_pending_settlement"
+        ? "The contribution has passed validation, peer review, and project review. Completion settlement is still pending."
+        : "Cerbanimo has not returned a review round for this task yet."
+    ),
+    metadata: {
+      taskId: String(round?.task_id ?? context.taskId ?? ""),
+      riskTier: round?.risk_tier ?? "",
+      peerBlessings: progress,
+      peerDeadline: round?.peer_deadline_at ?? "",
+      pmDeadline: round?.pm_deadline_at ?? "",
+      settlement: round?.settlement_status ?? ""
+    },
+    items: [
+      {
+        id: "validation",
+        title: "Validation",
+        subtitle: round?.stage === "validation_review" ? "Manual validation review" : "Machine or human validation complete",
+        status: round?.stage === "validation_review" ? "waiting" : "ready"
+      },
+      {
+        id: "peer",
+        title: "Peer Blessings",
+        subtitle: `${progress} received`,
+        status: round?.peer_gate_method ? `gate ${round.peer_gate_method}` : round?.status?.includes("peer") ? "open" : "pending"
+      },
+      {
+        id: "pm",
+        title: "PM Ritual Seal",
+        subtitle: round?.pm_gate_method ? `sealed by ${round.pm_gate_method}` : "not sealed",
+        status: round?.status === "pm_review_open" ? "open" : round?.status === "accepted_pending_settlement" ? "accepted" : "pending"
+      }
+    ]
+  };
+}
+
+export function reviewAssignmentsCard(context: TaskReviewContext): ResponseCard {
+  const assignments = context.assignments ?? (context.assignment ? [context.assignment] : []);
+  return {
+    id: `review-assignments-${crypto.randomUUID()}`,
+    kind: "review_assignment",
+    title: "Review queue",
+    subtitle: `${assignments.length} assignment${assignments.length === 1 ? "" : "s"}`,
+    body: assignments.length
+      ? "Open an assignment to inspect task requirements and accept before viewing frozen evidence."
+      : "Cerbanimo did not return any review assignments for you.",
+    items: assignments.map((assignment) => ({
+      id: String(assignment.assignment_uuid ?? assignment.id),
+      title: reviewRoleLabel(assignment.reviewer_role),
+      subtitle: assignment.task?.name ?? `Round ${assignment.review_round_id ?? ""}`,
+      status: assignment.status,
+      metadata: {
+        deadline: assignment.expires_at ?? "",
+        riskTier: assignment.risk_tier ?? "",
+        project: assignment.task?.projectName ?? ""
+      }
+    })),
+    actions: assignments.map((assignment) => ({
+      id: `open-review-${assignment.id}`,
+      label: "Open review",
+      style: "secondary" as const,
+      command: `open review ${assignment.assignment_uuid ?? assignment.id}`
+    }))
+  };
+}
+
+export function reviewAssignmentCard(context: TaskReviewContext): ResponseCard {
+  const assignment = context.assignment;
+  const round = context.round;
+  const allowed = context.allowedActions ?? {};
+  return {
+    id: `review-assignment-${assignment?.assignment_uuid ?? assignment?.id ?? crypto.randomUUID()}`,
+    kind: "review_assignment",
+    title: assignment ? reviewRoleLabel(assignment.reviewer_role) : "Review assignment",
+    subtitle: assignment?.status ?? round?.status ?? "unknown",
+    body: assignment?.status === "accepted"
+      ? "This assignment is accepted. Cerbanimo may show frozen evidence that is scoped to this review."
+      : "Accept the assignment before viewing raw frozen evidence. Decline or recuse if there is a conflict.",
+    metadata: {
+      roundId: String(round?.round_uuid ?? round?.id ?? ""),
+      assignmentId: String(assignment?.assignment_uuid ?? assignment?.id ?? ""),
+      riskTier: round?.risk_tier ?? assignment?.risk_tier ?? "",
+      peerBlessings: `${round?.peer_approvals_received ?? 0}/${round?.peer_approvals_required ?? 3}`,
+      deadline: assignment?.expires_at ?? round?.peer_deadline_at ?? round?.pm_deadline_at ?? ""
+    },
+    items: [
+      ...(context.task ? [{ id: "task", title: context.task.name ?? "Task", subtitle: context.task.description ?? "", status: context.task.status ?? "" }] : []),
+      ...(context.validation ? [{ id: "validation", title: "Validation findings", subtitle: String(context.validation.summary ?? "Review validation details."), status: String(context.validation.status ?? "") }] : []),
+      ...(round ? [{ id: "round", title: "Review round", subtitle: round.status, status: round.stage ?? "" }] : [])
+    ],
+    actions: [
+      ...(allowed.acceptAssignment ? [{ id: "accept-review", label: "Accept", style: "primary" as const, command: `accept review ${assignment?.assignment_uuid ?? assignment?.id}` }] : []),
+      ...(allowed.bless ? [{ id: "bless-review", label: "Bless", style: "primary" as const, command: `bless review ${round?.round_uuid ?? round?.id} ${assignment?.assignment_uuid ?? assignment?.id}` }] : []),
+      ...(allowed.seal ? [{ id: "seal-review", label: "Apply Ritual Seal", style: "primary" as const, command: `seal review ${round?.round_uuid ?? round?.id} ${assignment?.assignment_uuid ?? assignment?.id}` }] : []),
+      ...(allowed.requestChanges ? [{ id: "changes-review", label: "Request changes", style: "secondary" as const, command: `request review changes ${round?.round_uuid ?? round?.id} ${assignment?.assignment_uuid ?? assignment?.id}` }] : []),
+      ...(allowed.reject ? [{ id: "reject-review", label: "Reject", style: "danger" as const, command: `reject review ${round?.round_uuid ?? round?.id} ${assignment?.assignment_uuid ?? assignment?.id}` }] : []),
+      ...(allowed.recuse ? [{ id: "recuse-review", label: "Recuse", style: "secondary" as const, command: `recuse review ${assignment?.assignment_uuid ?? assignment?.id} reason=conflict` }] : [])
     ]
   };
 }
@@ -826,4 +938,11 @@ function validationSummary(task: CerbanimoTask): string {
   const validation = task.automation?.validationRequirements ?? [];
   if (validation.length === 0) return "No validation requirements listed";
   return validation.slice(0, 2).map((item) => item.description || item.requirementId).join("; ");
+}
+
+function reviewRoleLabel(role: string): string {
+  if (role === "validation_reviewer") return "Manual validation review";
+  if (role === "peer_reviewer") return "Peer Blessing review";
+  if (role === "pm_reviewer") return "PM Ritual Seal review";
+  return "Review assignment";
 }
