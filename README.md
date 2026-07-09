@@ -54,6 +54,14 @@ The quality-check path runs only through Cerbanimo's guarded executor contract. 
 
 See `docs/task-automation-preparation.md` and `docs/run-quality-checks-automation.md`.
 
+## Game Master Mode
+
+Kamiya now supports Game Master Mode as a presentation layer over Cerbanimo project state. Users can switch narration on/off, set intensity, open quest context, assemble parties, manage callings, preview quest launches, and view chronicles through `/api/v1` Game Master endpoints.
+
+Game Master Mode never owns project truth and never claims completion, rewards, dependency activation, or story publication. Saved chat history redacts one-time invite tokens before storing conversations in Cerbanimo.
+
+See `docs/game-master-mode.md`.
+
 ## Quick Start
 
 ```bash

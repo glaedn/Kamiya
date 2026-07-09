@@ -63,6 +63,17 @@ All clients should render the same card schema:
 - `action_preview`
 - `workflow_progress`
 - `workflow_failure`
+- `quest_scroll`
+- `quest_portal`
+- `quest_preview`
+- `party_assembly`
+- `character_calling`
+- `quest_opening_scene`
+- `encounter`
+- `quest_ledger`
+- `chronicle`
+- `narrative_settings`
+- `plain_mode`
 - `help`
 
 Card actions can be converted into web clicks, Discord buttons, Slack block actions, or Google Chat cards.
@@ -86,6 +97,25 @@ Every modifying action is represented as:
 ```
 
 Executions only occur after user confirmation.
+
+## Game Master Mode
+
+Kamiya consumes Cerbanimo's Game Master `/api/v1` endpoints:
+
+```text
+GET   /api/v1/me/narrative-preferences
+PATCH /api/v1/me/narrative-preferences
+GET   /api/v1/projects/:projectId/quest-context
+GET   /api/v1/projects/:projectId/party
+POST  /api/v1/projects/:projectId/invites
+POST  /api/v1/project-invites/:token/redeem
+POST  /api/v1/projects/:projectId/launch/preview
+GET   /api/v1/projects/:projectId/calling
+PATCH /api/v1/projects/:projectId/calling
+GET   /api/v1/projects/:projectId/chronicle
+```
+
+Game Master actions use normal confirmation cards when Cerbanimo returns a persisted action. One-time invite secrets are redacted from saved chat history.
 
 ## Golden Project Bootstrap
 

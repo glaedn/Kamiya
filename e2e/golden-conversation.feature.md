@@ -102,15 +102,19 @@ Required platform/API dependencies:
 - task assignment state detail;
 - conflict handling when another user claims first.
 
-## Stage 7: Narrative Guidance
+## Stage 7: Game Master Narrative Guidance
 
-Status: not implemented.
+Status: implemented for preference controls, quest context cards, party assembly cards, calling cards, chronicle cards, and launch previews.
 
-Required platform/API dependencies:
+Covered by unit/contract tests and targeted browser acceptance:
 
-- safe project/task context summaries;
-- user preference memory;
-- guidance cards that do not mutate platform state.
+- `/game-master`, `/narrative`, `/stats`, `/quest`, `/party`, `/calling`, `/launch quest`, and `/chronicle` commands;
+- one-turn plain override that starts with `Out of character:`;
+- Cerbanimo `/api/v1` quest context as the authoritative fact pack;
+- no reward, completion, dependency activation, or story publication claims;
+- one-time invite secrets redacted before saved chat persistence.
+
+See `docs/game-master-mode.md`.
 
 ## Stage 8: Reflection And Proof Submission
 
