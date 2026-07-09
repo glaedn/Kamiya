@@ -413,6 +413,93 @@ describe("handleChatTurn", () => {
     expect(sealed.message.content).toContain("accepted pending settlement");
     expect(JSON.stringify(sealed.message.cards)).toContain("Completion settlement is still pending");
   });
+
+  it("updates Game Master preferences through slash commands", async () => {
+    const fetchMock = vi
+      .fn()
+      .mockResolvedValueOnce(jsonResponse({ ok: true, data: { preferences: narrativePreferences() }, error: null, requestId: "req-pref" }))
+      .mockResolvedValueOnce(jsonResponse({
+        ok: true,
+        data: { preferences: { ...narrativePreferences(), presentationMode: "plain", narrativeIntensity: "light", statDisplayMode: "numeric" } },
+        error: null,
+        requestId: "req-update"
+      }));
+    vi.stubGlobal("fetch", fetchMock);
+
+    const response = await handleChatTurn({
+      message: "/game-master off",
+      history: [],
+      session: {},
+      auth: cerbanimoAuth(),
+      channel: "sdk"
+    });
+
+    expect(response.message.content).toContain("Out of character:");
+    expect(response.session.presentationMode).toBe("plain");
+    expect(response.message.cards?.[0].kind).toBe("narrative_settings");
+    expect(fetchMock.mock.calls.map((call) => String(call[0]))).toEqual([
+      "http://localhost:4000/api/v1/me/narrative-preferences",
+      "http://localhost:4000/api/v1/me/narrative-preferences"
+    ]);
+  });
+
+  it("renders Game Master quest context without reward or completion overclaim", async () => {
+    const fetchMock = vi
+      .fn()
+      .mockResolvedValueOnce(jsonResponse({ ok: true, data: questContext(), error: null, requestId: "req-quest" }))
+      .mockResolvedValueOnce(jsonResponse({ ok: true, data: { preferences: narrativePreferences() }, error: null, requestId: "req-pref" }));
+    vi.stubGlobal("fetch", fetchMock);
+
+    const response = await handleChatTurn({
+      message: "/quest 100",
+      history: [],
+      session: {},
+      auth: cerbanimoAuth(),
+      channel: "sdk"
+    });
+
+    expect(response.message.content).toContain("quest board");
+    expect(response.message.content).toContain("Completion settlement");
+    expect(response.message.content).not.toMatch(/\bawarded?\b/i);
+    expect(response.session.currentQuestProjectId).toBe(100);
+    expect(response.message.cards?.some((card) => card.kind === "quest_scroll")).toBe(true);
+    expect(response.message.cards?.some((card) => card.kind === "party_assembly")).toBe(true);
+  });
+
+  it("redacts one-time invite secrets before saving chat history", async () => {
+    const fetchMock = vi
+      .fn()
+      .mockResolvedValueOnce(jsonResponse({
+        ok: true,
+        data: {
+          invite: { id: 901, projectId: 100, status: "active", maxUses: 1, useCount: 0 },
+          token: "raw-token",
+          inviteUrl: "http://localhost:3000/project-invites/raw-token",
+          warning: "returned once"
+        },
+        error: null,
+        requestId: "req-invite"
+      }, 201))
+      .mockResolvedValueOnce(jsonResponse({
+        ok: true,
+        data: { chat: { id: 3, name: "Party invite", messages: [], messageCount: 1 } },
+        error: null,
+        requestId: "req-save"
+      }));
+    vi.stubGlobal("fetch", fetchMock);
+
+    const response = await handleChatTurn({
+      message: "/party invite 100",
+      history: [],
+      session: {},
+      auth: cerbanimoAuth()
+    });
+
+    expect(JSON.stringify(response.message.cards)).toContain("raw-token");
+    const savedBody = JSON.parse(String(fetchMock.mock.calls[1][1]?.body));
+    expect(JSON.stringify(savedBody.messages)).not.toContain("raw-token");
+    expect(JSON.stringify(savedBody.messages)).toContain("[redacted after one-time display]");
+  });
 });
 
 function cerbanimoAuth() {
@@ -609,6 +696,48 @@ function automationRunRow() {
       checks: [{ key: "build", status: "passed", message: "Build passed." }]
     },
     logs: []
+  };
+}
+
+function narrativePreferences() {
+  return {
+    presentationMode: "game_master",
+    narrativeIntensity: "standard",
+    preferredGenres: ["hopeful adventure"],
+    avoidThemes: [],
+    statDisplayMode: "both"
+  };
+}
+
+function questContext() {
+  return {
+    project: { id: 100, name: "Be The Bag", description: "Create a durable mutual aid tote project." },
+    questProfile: {
+      id: 1,
+      projectId: 100,
+      title: "Be The Bag",
+      premise: "Make reusable bags a visible local ritual.",
+      desiredOutcome: "A practical, recurring bag-sharing network.",
+      genre: "hopeful adventure",
+      tone: "collaborative",
+      keyThemes: ["mutual aid"]
+    },
+    narrativeSettings: {
+      projectId: 100,
+      presentationMode: "game_master",
+      narrativeIntensity: "standard",
+      statDisplayMode: "both"
+    },
+    party: {
+      settings: { projectId: 100, minPartySize: 1, targetPartySize: 3, maxPartySize: 7, openRecruitment: true, inviteRequired: false },
+      members: [{ userId: 1, username: "Glaed", isProjectCreator: true, calling: { title: "Quest Steward", roleArchetype: "steward" } }],
+      shortage: true
+    },
+    tasks: [{ id: 200, name: "Gather bag designs", status: "active-unassigned" }],
+    review: { activeRounds: [], acceptedPendingSettlement: 0 },
+    chronicle: [],
+    allowedActions: { createInvite: true, launchQuest: true, updateCalling: true },
+    safety: { noRewardOrCompletionClaims: true }
   };
 }
 

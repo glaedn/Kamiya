@@ -15,6 +15,11 @@ export const slashCommands: SlashCommand[] = [
   { name: "/help", label: "Help", intent: "knowledge", description: "Ask how Cerbanimo or Kamiya works." },
   { name: "/automation", label: "Automation", intent: "automation", description: "Preview or run auditable workflows." },
   { name: "/mode", label: "Agent mode", intent: "settings", description: "Switch Kamiya modes: planner, builder, reviewer, automator, manager, or coach." },
+  { name: "/game-master", label: "Game Master", intent: "settings", description: "Turn Game Master narration on or off." },
+  { name: "/narrative", label: "Narrative", intent: "settings", description: "Set narrative intensity: light, standard, or immersive." },
+  { name: "/party", label: "Party", intent: "navigation", description: "Show project party members and invite controls." },
+  { name: "/calling", label: "Calling", intent: "settings", description: "View or update your character calling for a project." },
+  { name: "/chronicle", label: "Chronicle", intent: "navigation", description: "Show the project chronicle." },
   { name: "/settings", label: "Settings", intent: "settings", description: "Configure Cerbanimo API access." }
 ];
 

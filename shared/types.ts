@@ -14,6 +14,10 @@ export type IntentCategory =
 
 export type AgentMode = "auto" | "planner" | "builder" | "reviewer" | "automator" | "manager" | "coach";
 
+export type PresentationMode = "game_master" | "plain";
+export type NarrativeIntensity = "light" | "standard" | "immersive";
+export type StatDisplayMode = "narrative" | "numeric" | "both";
+
 export type ChatClientChannel = "web" | "discord" | "slack" | "google_chat" | "voice" | "sdk";
 
 export type NextAction =
@@ -97,6 +101,17 @@ export type CardKind =
   | "workflow_progress"
   | "workflow_failure"
   | "evidence"
+  | "quest_scroll"
+  | "quest_portal"
+  | "quest_preview"
+  | "party_assembly"
+  | "character_calling"
+  | "quest_opening_scene"
+  | "encounter"
+  | "quest_ledger"
+  | "chronicle"
+  | "narrative_settings"
+  | "plain_mode"
   | "quest_summary"
   | "search_results"
   | "action_preview"
@@ -129,6 +144,7 @@ export interface ResponseCard {
 
 export type ActionKind =
   | "create_project"
+  | "game_master"
   | "submit_task"
   | "join_community"
   | "claim_task"
@@ -494,6 +510,218 @@ export interface TaskReviewContext {
   allowedActions?: ReviewAllowedActions;
 }
 
+export interface NarrativePreferences {
+  presentationMode: PresentationMode;
+  narrativeIntensity: NarrativeIntensity;
+  preferredGenres: string[];
+  avoidThemes: string[];
+  statDisplayMode: StatDisplayMode;
+  seenIntro?: boolean;
+  plainOverridePrefixes?: string[];
+  contentSafetyPreferences?: Record<string, unknown>;
+  updatedAt?: string | null;
+}
+
+export interface QuestProfile {
+  id?: number | string;
+  uuid?: string | null;
+  projectId?: number | string;
+  status?: string;
+  version?: number;
+  title: string;
+  premise: string;
+  desiredOutcome?: string | null;
+  genre?: string | null;
+  tone?: string | null;
+  stakes?: string | null;
+  openingScene?: string | null;
+  keyThemes?: string[];
+  avoidedThemes?: string[];
+  audience?: string;
+  source?: Record<string, unknown>;
+  createdAt?: string | null;
+  updatedAt?: string | null;
+}
+
+export interface NarrativeSettings {
+  projectId?: number | string;
+  presentationMode: PresentationMode;
+  narrativeIntensity: NarrativeIntensity;
+  genreOverride?: string | null;
+  avoidThemes?: string[];
+  statDisplayMode: StatDisplayMode;
+  spoilerLevel?: string;
+  safetyLevel?: string;
+  updatedAt?: string | null;
+}
+
+export interface PartyMember {
+  userId: number | string;
+  username?: string;
+  profilePicture?: string | null;
+  isProjectCreator?: boolean;
+  calling?: {
+    id?: number | string | null;
+    uuid?: string | null;
+    title?: string | null;
+    roleArchetype?: string;
+    contributionSummary?: string | null;
+    status?: string;
+    source?: string;
+  };
+}
+
+export interface PartySettings {
+  projectId?: number | string;
+  minPartySize: number;
+  targetPartySize: number;
+  maxPartySize: number;
+  openRecruitment: boolean;
+  inviteRequired: boolean;
+  roleSlots?: Array<Record<string, unknown>>;
+}
+
+export interface ProjectInvite {
+  id: number | string;
+  uuid?: string | null;
+  projectId?: number | string;
+  status: string;
+  maxUses?: number;
+  useCount?: number;
+  expiresAt?: string | null;
+  revokedAt?: string | null;
+  createdAt?: string | null;
+  updatedAt?: string | null;
+  tokenHint?: string | null;
+}
+
+export interface CharacterCalling {
+  id?: number | string;
+  uuid?: string | null;
+  projectId?: number | string;
+  userId?: number | string;
+  callingTitle?: string | null;
+  roleArchetype?: string;
+  contributionSummary?: string | null;
+  skillsSnapshot?: Record<string, unknown>;
+  status?: string;
+  source?: string;
+  joinedViaInviteId?: number | string | null;
+  createdAt?: string | null;
+  updatedAt?: string | null;
+}
+
+export interface NarrativeEvent {
+  id: number | string;
+  uuid?: string | null;
+  projectId?: number | string;
+  taskId?: number | string | null;
+  reviewRoundId?: number | string | null;
+  actorUserId?: number | string | null;
+  type: string;
+  title: string;
+  body?: string | null;
+  facts?: Record<string, unknown>;
+  visibility?: string;
+  createdAt?: string | null;
+}
+
+export interface GameMasterAllowedActions {
+  createInvite?: boolean;
+  revokeInvite?: boolean;
+  joinFromInvite?: boolean;
+  launchQuest?: boolean;
+  updateQuestProfile?: boolean;
+  updateNarrativeSettings?: boolean;
+  updateCalling?: boolean;
+}
+
+export interface QuestContext {
+  project?: CerbanimoProject;
+  questProfile?: QuestProfile;
+  narrativeSettings?: NarrativeSettings;
+  party?: {
+    settings?: PartySettings;
+    members?: PartyMember[];
+    shortage?: boolean;
+  };
+  tasks?: CerbanimoTask[];
+  review?: {
+    activeRounds?: TaskReviewRound[];
+    acceptedPendingSettlement?: number;
+  };
+  chronicle?: NarrativeEvent[];
+  allowedActions?: GameMasterAllowedActions;
+  safety?: Record<string, unknown>;
+}
+
+export interface PartyAssemblyContext {
+  project?: CerbanimoProject;
+  settings?: PartySettings;
+  members?: PartyMember[];
+  invites?: ProjectInvite[];
+  shortage?: boolean;
+  allowedActions?: GameMasterAllowedActions;
+}
+
+export interface QuestProfileResponse {
+  project?: CerbanimoProject;
+  profile?: QuestProfile;
+  allowedActions?: GameMasterAllowedActions;
+}
+
+export interface NarrativePreferencesResponse {
+  preferences: NarrativePreferences;
+}
+
+export interface NarrativeSettingsResponse {
+  settings: NarrativeSettings;
+  allowedActions?: GameMasterAllowedActions;
+}
+
+export interface InviteCreateResponse {
+  invite: ProjectInvite;
+  token?: string;
+  inviteUrl?: string | null;
+  warning?: string;
+  allowedActions?: GameMasterAllowedActions;
+}
+
+export interface InvitePreviewResponse {
+  invite: ProjectInvite;
+  project?: CerbanimoProject;
+  allowedActions?: { redeem?: boolean };
+  status: string;
+  unavailableReason?: string | null;
+}
+
+export interface InviteRedeemResponse {
+  projectId?: number | string;
+  calling?: CharacterCalling;
+  allowedActions?: GameMasterAllowedActions;
+}
+
+export interface CallingResponse {
+  project?: CerbanimoProject;
+  calling?: CharacterCalling | null;
+  allowedActions?: GameMasterAllowedActions;
+}
+
+export interface LaunchPreviewResponse {
+  canLaunch: boolean;
+  missing?: Array<{ field: string; message: string }>;
+  openingScene?: string | null;
+  firstEncounters?: CerbanimoTask[];
+  action?: CerbanimoAction;
+  allowedActions?: GameMasterAllowedActions;
+}
+
+export interface ChronicleResponse {
+  project?: CerbanimoProject;
+  events: NarrativeEvent[];
+  allowedActions?: GameMasterAllowedActions;
+}
+
 export interface AutomationRunResult {
   status: "checks_passed" | "checks_failed" | "blocked" | "cancelled" | "executor_failed" | "completed" | string;
   reportType?: string;
@@ -565,6 +793,12 @@ export interface KamiyaSessionState {
   planningDeadlinePrompted?: boolean;
   actionHistory?: ActionExecutionRecord[];
   mode?: AgentMode;
+  presentationMode?: PresentationMode;
+  narrativeIntensity?: NarrativeIntensity;
+  statDisplayMode?: StatDisplayMode;
+  preferredGenre?: string;
+  avoidThemes?: string[];
+  currentQuestProjectId?: number | string;
   lastProjectAction?: ActionPreview;
   activeAction?: ActiveCerbanimoActionState;
   e2eScenario?: string;

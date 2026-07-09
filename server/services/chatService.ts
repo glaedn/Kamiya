@@ -33,12 +33,28 @@ import {
   workflowFailureCard,
   workflowProgressCard
 } from "./cardFactory";
+import {
+  characterCallingCard,
+  chronicleCard,
+  gameMasterActionPreview,
+  inviteCreatedCard,
+  invitePreviewCard,
+  narrativeSettingsCard,
+  partyAssemblyCard,
+  questOpeningSceneCard,
+  questScrollCard
+} from "./gameMasterCardFactory";
 import { CerbanimoClient } from "./cerbanimoClient";
 import { previewAutomation, previewProjectCreation } from "./actionPlanner";
 import { routeIntent } from "./intentRouter";
 import { analyzePlanning } from "./planningService";
 import { parseModeCommand, shouldShowModes } from "./modeService";
 import { generateChatName } from "./chatTitleService";
+import { applyPreferenceCommand, gameMasterPreferenceCopy, oneTurnPlainCopy, parseGameMasterModeCommand } from "./gameMasterModeService";
+import { parsePartyCommand } from "./partyAssemblyService";
+import { projectQuestNarration } from "./narrativeProjectionService";
+import type { GameMasterModeCommand } from "./gameMasterModeService";
+import type { PartyCommand } from "./partyAssemblyService";
 
 export async function handleChatTurn(request: ChatTurnRequest): Promise<ChatTurnResponse> {
   const response = await buildChatTurnResponse(request);
@@ -68,6 +84,34 @@ async function buildChatTurnResponse(request: ChatTurnRequest): Promise<ChatTurn
       ...request.session,
       activeAction: activeStateFromDetail(detail.data, detail.requestId)
     }, undefined, [activeTaskCard(detail.data.activeTasks)]);
+  }
+
+  const gameMasterModeCommand = parseGameMasterModeCommand(message);
+  if (gameMasterModeCommand) {
+    if (gameMasterModeCommand.kind === "plain_override") {
+      const questCommand = parseQuestCommand(gameMasterModeCommand.strippedMessage);
+      if (questCommand?.kind === "show_quest") {
+        return showQuestContext(request, questCommand.projectId, true);
+      }
+      return respond(oneTurnPlainCopy(gameMasterModeCommand.strippedMessage), request.session);
+    }
+    return updateGameMasterPreferences(request, gameMasterModeCommand);
+  }
+
+  const questCommand = parseQuestCommand(message);
+  if (questCommand?.kind === "show_quest") {
+    return showQuestContext(request, questCommand.projectId);
+  }
+  if (questCommand?.kind === "launch") {
+    return previewQuestLaunch(request, questCommand.projectId);
+  }
+  if (questCommand?.kind === "chronicle") {
+    return showQuestChronicle(request, questCommand.projectId);
+  }
+
+  const partyCommand = parsePartyCommand(message);
+  if (partyCommand) {
+    return handlePartyCommand(request, partyCommand);
   }
 
   const taskAutomationCommand = parseTaskAutomationCommand(message);
@@ -288,6 +332,163 @@ async function buildChatTurnResponse(request: ChatTurnRequest): Promise<ChatTurn
   );
 }
 
+async function updateGameMasterPreferences(
+  request: ChatTurnRequest,
+  command: Exclude<GameMasterModeCommand, { kind: "plain_override" }>
+): Promise<ChatTurnResponse> {
+  const cerbanimo = new CerbanimoClient(request.auth);
+  const current = await cerbanimo.getNarrativePreferences();
+  const input = applyPreferenceCommand(command, current.data?.preferences);
+  const result = await cerbanimo.updateNarrativePreferences(input);
+  if (!result.ok || !result.data) {
+    return respond(`I could not update Game Master preferences in Cerbanimo: ${result.error}`, request.session);
+  }
+  const preferences = result.data.preferences;
+  return respond(
+    gameMasterPreferenceCopy(preferences),
+    {
+      ...request.session,
+      presentationMode: preferences.presentationMode,
+      narrativeIntensity: preferences.narrativeIntensity,
+      statDisplayMode: preferences.statDisplayMode,
+      preferredGenre: preferences.preferredGenres[0],
+      avoidThemes: preferences.avoidThemes
+    },
+    undefined,
+    [narrativeSettingsCard(preferences)]
+  );
+}
+
+type QuestCommand =
+  | { kind: "show_quest"; projectId: string }
+  | { kind: "launch"; projectId: string }
+  | { kind: "chronicle"; projectId: string };
+
+function parseQuestCommand(message: string): QuestCommand | undefined {
+  const trimmed = message.trim();
+  const show = trimmed.match(/^\/quest\s+(\S+)$/i)
+    ?? trimmed.match(/^\/project\s+(\S+)\s+quest$/i)
+    ?? trimmed.match(/^show quest\s+(\S+)$/i);
+  if (show?.[1]) return { kind: "show_quest", projectId: show[1] };
+
+  const launch = trimmed.match(/^\/launch\s+quest\s+(\S+)$/i)
+    ?? trimmed.match(/^launch quest\s+(\S+)$/i);
+  if (launch?.[1]) return { kind: "launch", projectId: launch[1] };
+
+  const chronicle = trimmed.match(/^\/chronicle\s+(\S+)$/i)
+    ?? trimmed.match(/^show chronicle\s+(\S+)$/i);
+  if (chronicle?.[1]) return { kind: "chronicle", projectId: chronicle[1] };
+
+  return undefined;
+}
+
+async function showQuestContext(request: ChatTurnRequest, projectId: string, plainOverride = false): Promise<ChatTurnResponse> {
+  const cerbanimo = new CerbanimoClient(request.auth);
+  const [contextResult, preferencesResult] = await Promise.all([
+    cerbanimo.getQuestContext(projectId),
+    cerbanimo.getNarrativePreferences()
+  ]);
+  if (!contextResult.ok || !contextResult.data) {
+    return respond(`I could not load that quest from Cerbanimo: ${contextResult.error}`, request.session);
+  }
+  const preferences = preferencesResult.data?.preferences;
+  const content = projectQuestNarration(contextResult.data, preferences, plainOverride);
+  return respond(
+    content,
+    {
+      ...request.session,
+      currentQuestProjectId: contextResult.data.project?.id ?? projectId,
+      presentationMode: plainOverride ? request.session.presentationMode : preferences?.presentationMode ?? request.session.presentationMode,
+      narrativeIntensity: preferences?.narrativeIntensity ?? request.session.narrativeIntensity,
+      statDisplayMode: preferences?.statDisplayMode ?? request.session.statDisplayMode
+    },
+    undefined,
+    [
+      questScrollCard(contextResult.data),
+      partyAssemblyCard({
+        project: contextResult.data.project,
+        settings: contextResult.data.party?.settings,
+        members: contextResult.data.party?.members,
+        shortage: contextResult.data.party?.shortage,
+        allowedActions: contextResult.data.allowedActions
+      }),
+      ...(contextResult.data.chronicle?.length ? [chronicleCard({ project: contextResult.data.project, events: contextResult.data.chronicle, allowedActions: contextResult.data.allowedActions })] : [])
+    ]
+  );
+}
+
+async function previewQuestLaunch(request: ChatTurnRequest, projectId: string): Promise<ChatTurnResponse> {
+  const result = await new CerbanimoClient(request.auth).launchQuestPreview(projectId);
+  if (!result.ok || !result.data) {
+    return respond(`Cerbanimo could not prepare the quest launch preview: ${result.error}`, request.session);
+  }
+  const action = result.data.action
+    ? gameMasterActionPreview(result.data.action, "Launch quest opening", result.data.openingScene ?? "Confirm the Game Master quest launch.")
+    : undefined;
+  return respond(
+    result.data.canLaunch
+      ? "I prepared the quest opening scene. Confirm before Cerbanimo records the launch event."
+      : "Cerbanimo says this quest is not ready to launch yet.",
+    {
+      ...request.session,
+      pendingAction: action,
+      currentQuestProjectId: projectId
+    },
+    undefined,
+    [
+      questOpeningSceneCard(result.data),
+      ...(action ? [actionPreviewCard(action)] : [])
+    ]
+  );
+}
+
+async function showQuestChronicle(request: ChatTurnRequest, projectId: string): Promise<ChatTurnResponse> {
+  const result = await new CerbanimoClient(request.auth).getChronicle(projectId);
+  if (!result.ok || !result.data) {
+    return respond(`I could not load the quest chronicle from Cerbanimo: ${result.error}`, request.session);
+  }
+  return respond("Here is the chronicle Cerbanimo returned for this quest.", { ...request.session, currentQuestProjectId: projectId }, undefined, [chronicleCard(result.data)]);
+}
+
+async function handlePartyCommand(request: ChatTurnRequest, command: PartyCommand): Promise<ChatTurnResponse> {
+  const cerbanimo = new CerbanimoClient(request.auth);
+  if (command.kind === "show_party") {
+    const result = await cerbanimo.getParty(command.projectId);
+    if (!result.ok || !result.data) return respond(`I could not load that project party: ${result.error}`, request.session);
+    return respond("Here is the project party Cerbanimo returned.", { ...request.session, currentQuestProjectId: command.projectId }, undefined, [partyAssemblyCard(result.data)]);
+  }
+  if (command.kind === "create_invite") {
+    const result = await cerbanimo.createProjectInvite(command.projectId);
+    if (!result.ok || !result.data) return respond(`Cerbanimo could not create a project invite: ${result.error}`, request.session);
+    return respond("Cerbanimo created a party invite. The raw token is shown once in the card metadata.", { ...request.session, currentQuestProjectId: command.projectId }, undefined, [inviteCreatedCard(result.data)]);
+  }
+  if (command.kind === "preview_invite") {
+    const result = await cerbanimo.previewProjectInvite(command.token);
+    if (!result.ok || !result.data) return respond(`Cerbanimo could not preview that invite: ${result.error}`, request.session);
+    return respond("Cerbanimo returned the invite preview.", request.session, undefined, [invitePreviewCard(result.data)]);
+  }
+  if (command.kind === "redeem_invite") {
+    const result = await cerbanimo.redeemProjectInvite(command.token);
+    if (!result.ok || !result.data) return respond(`Cerbanimo could not redeem that invite: ${result.error}`, request.session);
+    const projectId = result.data.projectId ? String(result.data.projectId) : request.session.currentQuestProjectId ? String(request.session.currentQuestProjectId) : "";
+    const calling = projectId ? await cerbanimo.getCalling(projectId) : undefined;
+    return respond(
+      "You joined the quest party. You can update your calling when you are ready.",
+      { ...request.session, currentQuestProjectId: result.data.projectId ?? request.session.currentQuestProjectId },
+      undefined,
+      calling?.data ? [characterCallingCard(calling.data)] : []
+    );
+  }
+  if (command.kind === "show_calling") {
+    const result = await cerbanimo.getCalling(command.projectId);
+    if (!result.ok || !result.data) return respond(`I could not load your calling: ${result.error}`, request.session);
+    return respond("Here is your current character calling for this quest.", { ...request.session, currentQuestProjectId: command.projectId }, undefined, [characterCallingCard(result.data)]);
+  }
+  const updated = await cerbanimo.updateCalling(command.projectId, command.input);
+  if (!updated.ok || !updated.data) return respond(`Cerbanimo could not update your calling: ${updated.error}`, request.session);
+  return respond("Calling updated. Cerbanimo remains the source of truth for party membership.", { ...request.session, currentQuestProjectId: command.projectId }, undefined, [characterCallingCard(updated.data)]);
+}
+
 async function prepareTaskAutomation(
   request: ChatTurnRequest,
   taskId: string,
@@ -382,7 +583,7 @@ async function persistChatTurn(request: ChatTurnRequest, response: ChatTurnRespo
   const saved = await new CerbanimoClient(request.auth).saveChat({
     chatId: session.chatId,
     name: chatName,
-    messages,
+    messages: redactSensitiveMessages(messages),
     session
   });
   const savedChat = saved.ok ? saved.data?.chat : undefined;
@@ -395,6 +596,23 @@ async function persistChatTurn(request: ChatTurnRequest, response: ChatTurnRespo
       chatName: savedChat?.name ?? session.chatName
     }
   };
+}
+
+function redactSensitiveMessages(messages: ChatMessage[]): ChatMessage[] {
+  return messages.map((message) => ({
+    ...message,
+    cards: message.cards?.map((card) => ({
+      ...card,
+      metadata: card.metadata
+        ? Object.fromEntries(
+            Object.entries(card.metadata).map(([key, value]) => [
+              key,
+              ["token", "inviteUrl"].includes(key) ? "[redacted after one-time display]" : value
+            ])
+          )
+        : undefined
+    }))
+  }));
 }
 
 export async function handleChannelTurn(channelRequest: {

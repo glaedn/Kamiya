@@ -10,7 +10,18 @@ import type {
   KamiyaSavedChat,
   KamiyaSavedChatSummary,
   KamiyaSessionState,
+  CallingResponse,
+  ChronicleResponse,
+  InviteCreateResponse,
+  InvitePreviewResponse,
+  InviteRedeemResponse,
+  LaunchPreviewResponse,
+  NarrativePreferencesResponse,
+  NarrativeSettingsResponse,
+  PartyAssemblyContext,
   ProjectBootstrapActionDetail,
+  QuestContext,
+  QuestProfileResponse,
   TaskEvidenceContext,
   TaskAutomationContext,
   TaskReviewContext
@@ -349,6 +360,226 @@ const taskReviewContextSchema = z.object({
   evidence: taskEvidenceContextSchema.optional().nullable(),
   copy: z.string().optional(),
   allowedActions: reviewAllowedActionsSchema
+}).passthrough();
+
+const presentationModeSchema = z.enum(["game_master", "plain"]).catch("game_master");
+const narrativeIntensitySchema = z.enum(["light", "standard", "immersive"]).catch("standard");
+const statDisplayModeSchema = z.enum(["narrative", "numeric", "both"]).catch("both");
+
+const gameMasterAllowedActionsSchema = z.object({
+  createInvite: z.boolean().optional(),
+  revokeInvite: z.boolean().optional(),
+  joinFromInvite: z.boolean().optional(),
+  launchQuest: z.boolean().optional(),
+  updateQuestProfile: z.boolean().optional(),
+  updateNarrativeSettings: z.boolean().optional(),
+  updateCalling: z.boolean().optional()
+}).partial().optional();
+
+const narrativePreferencesSchema = z.object({
+  presentationMode: presentationModeSchema,
+  narrativeIntensity: narrativeIntensitySchema,
+  preferredGenres: z.array(z.string()).default([]).catch([]),
+  avoidThemes: z.array(z.string()).default([]).catch([]),
+  statDisplayMode: statDisplayModeSchema,
+  seenIntro: z.boolean().optional(),
+  plainOverridePrefixes: z.array(z.string()).optional().default(["Game Master,", "Game Master:", "/plain"]),
+  contentSafetyPreferences: z.record(z.unknown()).optional().default({}),
+  updatedAt: z.string().optional().nullable()
+}).passthrough();
+
+const narrativeSettingsSchema = z.object({
+  projectId: z.union([z.number(), z.string()]).optional(),
+  presentationMode: presentationModeSchema,
+  narrativeIntensity: narrativeIntensitySchema,
+  genreOverride: z.string().optional().nullable(),
+  avoidThemes: z.array(z.string()).optional().default([]),
+  statDisplayMode: statDisplayModeSchema,
+  spoilerLevel: z.string().optional(),
+  safetyLevel: z.string().optional(),
+  updatedAt: z.string().optional().nullable()
+}).passthrough();
+
+const questProfileSchema = z.object({
+  id: z.union([z.number(), z.string()]).optional(),
+  uuid: z.string().optional().nullable(),
+  projectId: z.union([z.number(), z.string()]).optional(),
+  status: z.string().optional(),
+  version: z.number().optional(),
+  title: z.string(),
+  premise: z.string(),
+  desiredOutcome: z.string().optional().nullable(),
+  genre: z.string().optional().nullable(),
+  tone: z.string().optional().nullable(),
+  stakes: z.string().optional().nullable(),
+  openingScene: z.string().optional().nullable(),
+  keyThemes: z.array(z.string()).optional().default([]),
+  avoidedThemes: z.array(z.string()).optional().default([]),
+  audience: z.string().optional(),
+  source: z.record(z.unknown()).optional().default({}),
+  createdAt: z.string().optional().nullable(),
+  updatedAt: z.string().optional().nullable()
+}).passthrough();
+
+const partyMemberSchema = z.object({
+  userId: z.union([z.number(), z.string()]),
+  username: z.string().optional(),
+  profilePicture: z.string().optional().nullable(),
+  isProjectCreator: z.boolean().optional(),
+  calling: z.object({
+    id: z.union([z.number(), z.string()]).optional().nullable(),
+    uuid: z.string().optional().nullable(),
+    title: z.string().optional().nullable(),
+    roleArchetype: z.string().optional(),
+    contributionSummary: z.string().optional().nullable(),
+    status: z.string().optional(),
+    source: z.string().optional()
+  }).partial().optional()
+}).passthrough();
+
+const partySettingsSchema = z.object({
+  projectId: z.union([z.number(), z.string()]).optional(),
+  minPartySize: z.number().default(1),
+  targetPartySize: z.number().default(3),
+  maxPartySize: z.number().default(7),
+  openRecruitment: z.boolean().default(true),
+  inviteRequired: z.boolean().default(false),
+  roleSlots: z.array(z.record(z.unknown())).optional().default([])
+}).passthrough();
+
+const projectInviteSchema = z.object({
+  id: z.union([z.number(), z.string()]),
+  uuid: z.string().optional().nullable(),
+  projectId: z.union([z.number(), z.string()]).optional(),
+  status: z.string(),
+  maxUses: z.number().optional(),
+  useCount: z.number().optional(),
+  expiresAt: z.string().optional().nullable(),
+  revokedAt: z.string().optional().nullable(),
+  createdAt: z.string().optional().nullable(),
+  updatedAt: z.string().optional().nullable(),
+  tokenHint: z.string().optional().nullable()
+}).passthrough();
+
+const characterCallingSchema = z.object({
+  id: z.union([z.number(), z.string()]).optional(),
+  uuid: z.string().optional().nullable(),
+  projectId: z.union([z.number(), z.string()]).optional(),
+  userId: z.union([z.number(), z.string()]).optional(),
+  callingTitle: z.string().optional().nullable(),
+  roleArchetype: z.string().optional(),
+  contributionSummary: z.string().optional().nullable(),
+  skillsSnapshot: z.record(z.unknown()).optional().default({}),
+  status: z.string().optional(),
+  source: z.string().optional(),
+  joinedViaInviteId: z.union([z.number(), z.string()]).optional().nullable(),
+  createdAt: z.string().optional().nullable(),
+  updatedAt: z.string().optional().nullable()
+}).passthrough();
+
+const narrativeEventSchema = z.object({
+  id: z.union([z.number(), z.string()]),
+  uuid: z.string().optional().nullable(),
+  projectId: z.union([z.number(), z.string()]).optional(),
+  taskId: z.union([z.number(), z.string()]).optional().nullable(),
+  reviewRoundId: z.union([z.number(), z.string()]).optional().nullable(),
+  actorUserId: z.union([z.number(), z.string()]).optional().nullable(),
+  type: z.string(),
+  title: z.string(),
+  body: z.string().optional().nullable(),
+  facts: z.record(z.unknown()).optional().default({}),
+  visibility: z.string().optional(),
+  createdAt: z.string().optional().nullable()
+}).passthrough();
+
+const safeProjectSchema = z.object({
+  id: z.number()
+}).passthrough();
+
+const narrativePreferencesResponseSchema = z.object({
+  preferences: narrativePreferencesSchema
+}).passthrough();
+
+const questProfileResponseSchema = z.object({
+  project: safeProjectSchema.optional(),
+  profile: questProfileSchema.optional(),
+  allowedActions: gameMasterAllowedActionsSchema
+}).passthrough();
+
+const questContextSchema = z.object({
+  project: safeProjectSchema.optional(),
+  questProfile: questProfileSchema.optional(),
+  narrativeSettings: narrativeSettingsSchema.optional(),
+  party: z.object({
+    settings: partySettingsSchema.optional(),
+    members: z.array(partyMemberSchema).optional().default([]),
+    shortage: z.boolean().optional()
+  }).partial().optional(),
+  tasks: z.array(taskSchema).optional().default([]),
+  review: z.object({
+    activeRounds: z.array(taskReviewRoundSchema).optional().default([]),
+    acceptedPendingSettlement: z.number().optional().default(0)
+  }).partial().optional(),
+  chronicle: z.array(narrativeEventSchema).optional().default([]),
+  allowedActions: gameMasterAllowedActionsSchema,
+  safety: z.record(z.unknown()).optional()
+}).passthrough();
+
+const narrativeSettingsResponseSchema = z.object({
+  settings: narrativeSettingsSchema,
+  allowedActions: gameMasterAllowedActionsSchema
+}).passthrough();
+
+const partyAssemblySchema = z.object({
+  project: safeProjectSchema.optional(),
+  settings: partySettingsSchema.optional(),
+  members: z.array(partyMemberSchema).optional().default([]),
+  invites: z.array(projectInviteSchema).optional().default([]),
+  shortage: z.boolean().optional(),
+  allowedActions: gameMasterAllowedActionsSchema
+}).passthrough();
+
+const inviteCreateResponseSchema = z.object({
+  invite: projectInviteSchema,
+  token: z.string().optional(),
+  inviteUrl: z.string().optional().nullable(),
+  warning: z.string().optional(),
+  allowedActions: gameMasterAllowedActionsSchema
+}).passthrough();
+
+const invitePreviewResponseSchema = z.object({
+  invite: projectInviteSchema,
+  project: safeProjectSchema.optional(),
+  allowedActions: z.object({ redeem: z.boolean().optional() }).partial().optional(),
+  status: z.string(),
+  unavailableReason: z.string().optional().nullable()
+}).passthrough();
+
+const inviteRedeemResponseSchema = z.object({
+  projectId: z.union([z.number(), z.string()]).optional(),
+  calling: characterCallingSchema.optional(),
+  allowedActions: gameMasterAllowedActionsSchema
+}).passthrough();
+
+const callingResponseSchema = z.object({
+  project: safeProjectSchema.optional(),
+  calling: characterCallingSchema.optional().nullable(),
+  allowedActions: gameMasterAllowedActionsSchema
+}).passthrough();
+
+const launchPreviewResponseSchema = z.object({
+  canLaunch: z.boolean(),
+  missing: z.array(z.object({ field: z.string(), message: z.string() })).optional().default([]),
+  openingScene: z.string().optional().nullable(),
+  firstEncounters: z.array(taskSchema).optional().default([]),
+  action: cerbanimoActionSchema.optional(),
+  allowedActions: gameMasterAllowedActionsSchema
+}).passthrough();
+
+const chronicleResponseSchema = z.object({
+  project: safeProjectSchema.optional(),
+  events: z.array(narrativeEventSchema).default([]),
+  allowedActions: gameMasterAllowedActionsSchema
 }).passthrough();
 
 const automationRunSchema = z.object({
@@ -722,6 +953,145 @@ export class CerbanimoClient {
     ) as Promise<CerbanimoResult<AutomationRun>>;
   }
 
+  async getNarrativePreferences(): Promise<CerbanimoResult<NarrativePreferencesResponse>> {
+    return this.requestV1(
+      "/me/narrative-preferences",
+      "GET",
+      undefined,
+      narrativePreferencesResponseSchema
+    ) as Promise<CerbanimoResult<NarrativePreferencesResponse>>;
+  }
+
+  async updateNarrativePreferences(input: Record<string, unknown>): Promise<CerbanimoResult<NarrativePreferencesResponse>> {
+    return this.requestV1(
+      "/me/narrative-preferences",
+      "PATCH",
+      input,
+      narrativePreferencesResponseSchema
+    ) as Promise<CerbanimoResult<NarrativePreferencesResponse>>;
+  }
+
+  async getQuestProfile(projectId: string | number): Promise<CerbanimoResult<QuestProfileResponse>> {
+    return this.requestV1(
+      `/projects/${encodeURIComponent(String(projectId))}/quest-profile`,
+      "GET",
+      undefined,
+      questProfileResponseSchema
+    ) as Promise<CerbanimoResult<QuestProfileResponse>>;
+  }
+
+  async getQuestContext(projectId: string | number): Promise<CerbanimoResult<QuestContext>> {
+    return this.requestV1(
+      `/projects/${encodeURIComponent(String(projectId))}/quest-context`,
+      "GET",
+      undefined,
+      questContextSchema
+    ) as Promise<CerbanimoResult<QuestContext>>;
+  }
+
+  async updateNarrativeSettings(projectId: string | number, input: Record<string, unknown>): Promise<CerbanimoResult<NarrativeSettingsResponse>> {
+    return this.requestV1(
+      `/projects/${encodeURIComponent(String(projectId))}/narrative-settings`,
+      "PATCH",
+      input,
+      narrativeSettingsResponseSchema
+    ) as Promise<CerbanimoResult<NarrativeSettingsResponse>>;
+  }
+
+  async previewQuestProfileUpdate(projectId: string | number, input: Record<string, unknown>): Promise<CerbanimoResult<{ proposedProfile?: Record<string, unknown>; action?: CerbanimoAction }>> {
+    return this.requestV1(
+      `/projects/${encodeURIComponent(String(projectId))}/quest-profile/preview-update`,
+      "POST",
+      { ...input, sourceClient: "kamiya-web" },
+      z.object({
+        proposedProfile: z.record(z.unknown()).optional(),
+        action: cerbanimoActionSchema.optional(),
+        allowedActions: gameMasterAllowedActionsSchema
+      }).passthrough()
+    ) as Promise<CerbanimoResult<{ proposedProfile?: Record<string, unknown>; action?: CerbanimoAction }>>;
+  }
+
+  async getParty(projectId: string | number): Promise<CerbanimoResult<PartyAssemblyContext>> {
+    return this.requestV1(
+      `/projects/${encodeURIComponent(String(projectId))}/party`,
+      "GET",
+      undefined,
+      partyAssemblySchema
+    ) as Promise<CerbanimoResult<PartyAssemblyContext>>;
+  }
+
+  async createProjectInvite(projectId: string | number, input: { maxUses?: number; expiresInHours?: number } = {}): Promise<CerbanimoResult<InviteCreateResponse>> {
+    return this.requestV1(
+      `/projects/${encodeURIComponent(String(projectId))}/invites`,
+      "POST",
+      input,
+      inviteCreateResponseSchema
+    ) as Promise<CerbanimoResult<InviteCreateResponse>>;
+  }
+
+  async revokeProjectInvite(projectId: string | number, inviteId: string | number, reason?: string): Promise<CerbanimoResult<{ invite: InviteCreateResponse["invite"] }>> {
+    return this.requestV1(
+      `/projects/${encodeURIComponent(String(projectId))}/invites/${encodeURIComponent(String(inviteId))}/revoke`,
+      "POST",
+      { reason },
+      z.object({ invite: projectInviteSchema, allowedActions: gameMasterAllowedActionsSchema }).passthrough()
+    ) as Promise<CerbanimoResult<{ invite: InviteCreateResponse["invite"] }>>;
+  }
+
+  async previewProjectInvite(token: string): Promise<CerbanimoResult<InvitePreviewResponse>> {
+    return this.requestV1(
+      `/project-invites/${encodeURIComponent(token)}/preview`,
+      "GET",
+      undefined,
+      invitePreviewResponseSchema
+    ) as Promise<CerbanimoResult<InvitePreviewResponse>>;
+  }
+
+  async redeemProjectInvite(token: string): Promise<CerbanimoResult<InviteRedeemResponse>> {
+    return this.requestV1(
+      `/project-invites/${encodeURIComponent(token)}/redeem`,
+      "POST",
+      {},
+      inviteRedeemResponseSchema
+    ) as Promise<CerbanimoResult<InviteRedeemResponse>>;
+  }
+
+  async launchQuestPreview(projectId: string | number): Promise<CerbanimoResult<LaunchPreviewResponse>> {
+    return this.requestV1(
+      `/projects/${encodeURIComponent(String(projectId))}/launch/preview`,
+      "POST",
+      {},
+      launchPreviewResponseSchema
+    ) as Promise<CerbanimoResult<LaunchPreviewResponse>>;
+  }
+
+  async getCalling(projectId: string | number): Promise<CerbanimoResult<CallingResponse>> {
+    return this.requestV1(
+      `/projects/${encodeURIComponent(String(projectId))}/calling`,
+      "GET",
+      undefined,
+      callingResponseSchema
+    ) as Promise<CerbanimoResult<CallingResponse>>;
+  }
+
+  async updateCalling(projectId: string | number, input: Record<string, unknown>): Promise<CerbanimoResult<CallingResponse>> {
+    return this.requestV1(
+      `/projects/${encodeURIComponent(String(projectId))}/calling`,
+      "PATCH",
+      input,
+      callingResponseSchema
+    ) as Promise<CerbanimoResult<CallingResponse>>;
+  }
+
+  async getChronicle(projectId: string | number): Promise<CerbanimoResult<ChronicleResponse>> {
+    return this.requestV1(
+      `/projects/${encodeURIComponent(String(projectId))}/chronicle`,
+      "GET",
+      undefined,
+      chronicleResponseSchema
+    ) as Promise<CerbanimoResult<ChronicleResponse>>;
+  }
+
   async executeAction(action: ActionPreview): Promise<CerbanimoResult> {
     if (!this.apiUrl || !this.token) {
       return {
@@ -784,6 +1154,20 @@ export class CerbanimoClient {
           : { ok: true, data: { action: confirmed.data, automationRunError: run.error }, requestId: confirmed.requestId };
       }
       return this.request("/automation/actions", "POST", action.payload);
+    }
+
+    if (action.kind === "game_master") {
+      const actionId = action.cerbanimoActionUuid ?? action.cerbanimoActionId;
+      if (!actionId) {
+        return {
+          ok: false,
+          error: "Kamiya cannot confirm this Game Master action because Cerbanimo did not return a persisted action preview."
+        };
+      }
+      const confirmed = await this.confirmAction(actionId);
+      return confirmed.ok
+        ? { ok: true, data: { action: confirmed.data }, requestId: confirmed.requestId }
+        : confirmed;
     }
 
     return {

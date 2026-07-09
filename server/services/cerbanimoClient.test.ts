@@ -360,6 +360,81 @@ describe("CerbanimoClient /api/v1 action contract", () => {
     expect(urls).not.toContain("http://localhost:4000/projects/auto-generate");
     expect(urls.every((url) => url.includes("/api/v1/actions/"))).toBe(true);
   });
+
+  it("loads Game Master quest context through the v1 project API", async () => {
+    const fetchMock = mockFetch({
+      ok: true,
+      data: questContext(),
+      error: null,
+      requestId: "req-quest"
+    });
+
+    const result = await new CerbanimoClient(auth).getQuestContext(100);
+
+    expect(result.ok).toBe(true);
+    expect(result.data?.questProfile?.title).toBe("Be The Bag");
+    expect(result.data?.party?.members?.[0].calling?.roleArchetype).toBe("steward");
+    expect(fetchMock.mock.calls[0][0]).toBe("http://localhost:4000/api/v1/projects/100/quest-context");
+  });
+
+  it("updates Game Master narrative preferences through the profile API", async () => {
+    const fetchMock = mockFetch({
+      ok: true,
+      data: {
+        preferences: {
+          presentationMode: "plain",
+          narrativeIntensity: "light",
+          preferredGenres: [],
+          avoidThemes: ["horror"],
+          statDisplayMode: "numeric"
+        }
+      },
+      error: null,
+      requestId: "req-gm"
+    });
+
+    const result = await new CerbanimoClient(auth).updateNarrativePreferences({ presentationMode: "plain" });
+
+    expect(result.ok).toBe(true);
+    expect(result.data?.preferences.presentationMode).toBe("plain");
+    expect(fetchMock.mock.calls[0][0]).toBe("http://localhost:4000/api/v1/me/narrative-preferences");
+  });
+
+  it("creates and redeems Game Master party invites without using legacy endpoints", async () => {
+    const fetchMock = vi
+      .fn()
+      .mockResolvedValueOnce(jsonResponse({
+        ok: true,
+        data: {
+          invite: { id: 901, projectId: 100, status: "active", maxUses: 1, useCount: 0 },
+          token: "raw-token",
+          inviteUrl: "http://localhost:3000/project-invites/raw-token",
+          warning: "returned once"
+        },
+        error: null,
+        requestId: "req-invite"
+      }, 201))
+      .mockResolvedValueOnce(jsonResponse({
+        ok: true,
+        data: {
+          projectId: 100,
+          calling: { id: 33, projectId: 100, roleArchetype: "party_member", callingTitle: "New Companion" }
+        },
+        error: null,
+        requestId: "req-redeem"
+      }, 201));
+    vi.stubGlobal("fetch", fetchMock);
+
+    const client = new CerbanimoClient(auth);
+    const created = await client.createProjectInvite(100);
+    const redeemed = await client.redeemProjectInvite("raw-token");
+
+    expect(created.ok).toBe(true);
+    expect(created.data?.token).toBe("raw-token");
+    expect(redeemed.data?.calling?.roleArchetype).toBe("party_member");
+    expect(fetchMock.mock.calls[0][0]).toBe("http://localhost:4000/api/v1/projects/100/invites");
+    expect(fetchMock.mock.calls[1][0]).toBe("http://localhost:4000/api/v1/project-invites/raw-token/redeem");
+  });
 });
 
 function projectAction(): ActionPreview {
@@ -559,6 +634,38 @@ function evidenceValidationRunRow() {
       requirementResults: [{ requirementId: "proof", verdict: "satisfied", description: "Show the work was completed." }]
     },
     logs: []
+  };
+}
+
+function questContext() {
+  return {
+    project: { id: 100, name: "Be The Bag", description: "Create a durable mutual aid tote project." },
+    questProfile: {
+      id: 1,
+      projectId: 100,
+      title: "Be The Bag",
+      premise: "Make reusable bags a visible local ritual.",
+      desiredOutcome: "A practical, recurring bag-sharing network.",
+      genre: "hopeful adventure",
+      tone: "collaborative",
+      keyThemes: ["mutual aid"]
+    },
+    narrativeSettings: {
+      projectId: 100,
+      presentationMode: "game_master",
+      narrativeIntensity: "standard",
+      statDisplayMode: "both"
+    },
+    party: {
+      settings: { projectId: 100, minPartySize: 1, targetPartySize: 3, maxPartySize: 7, openRecruitment: true, inviteRequired: false },
+      members: [{ userId: 1, username: "Glaed", isProjectCreator: true, calling: { title: "Quest Steward", roleArchetype: "steward" } }],
+      shortage: true
+    },
+    tasks: [{ id: 200, name: "Gather bag designs", status: "active-unassigned" }],
+    review: { activeRounds: [], acceptedPendingSettlement: 0 },
+    chronicle: [],
+    allowedActions: { createInvite: true, launchQuest: true, updateCalling: true },
+    safety: { noRewardOrCompletionClaims: true }
   };
 }
 
