@@ -314,6 +314,10 @@ h1 {
 }
 
 .response-card.quest_summary,
+.response-card.quest_scroll,
+.response-card.quest_portal,
+.response-card.quest_opening_scene,
+.response-card.quest_ledger,
 .response-card.automation,
 .response-card.mode {
   border-color: rgba(100, 234, 255, 0.34);
@@ -322,13 +326,20 @@ h1 {
 
 .response-card.search_results,
 .response-card.integration,
-.response-card.action_queue {
+.response-card.action_queue,
+.response-card.party_assembly,
+.response-card.character_calling,
+.response-card.chronicle,
+.response-card.narrative_settings {
   border-color: rgba(255, 77, 227, 0.34);
   box-shadow: var(--shadow), var(--glow-magenta);
 }
 
 .response-card.stats,
-.response-card.validation_report {
+.response-card.validation_report,
+.response-card.quest_preview,
+.response-card.encounter,
+.response-card.plain_mode {
   border-color: rgba(140, 109, 255, 0.36);
 }
 
@@ -644,6 +655,45 @@ input:focus {
 .pending-action p {
   font-size: 13px;
   line-height: 1.5;
+}
+
+.gm-onboarding {
+  display: grid;
+  gap: 10px;
+  padding: 12px;
+  border: 1px solid var(--line-magenta);
+  border-radius: 8px;
+  background:
+    linear-gradient(135deg, rgba(100, 234, 255, 0.08), rgba(255, 77, 227, 0.12)),
+    rgba(255, 255, 255, 0.045);
+  box-shadow: var(--glow-magenta);
+}
+
+.gm-onboarding > div {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  color: var(--magenta);
+}
+
+.gm-onboarding h2 {
+  margin: 0;
+  color: var(--ink);
+  font-size: 14px;
+}
+
+.gm-onboarding p,
+.plain-mode-banner {
+  color: var(--muted-strong);
+  font-size: 13px;
+  line-height: 1.45;
+}
+
+.plain-mode-banner {
+  padding: 10px 12px;
+  border: 1px solid rgba(255, 209, 102, 0.42);
+  border-radius: 8px;
+  background: var(--gold-soft);
 }
 
 .pending-action,

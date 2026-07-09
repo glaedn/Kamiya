@@ -3,6 +3,7 @@ import { Bot, LogIn, LogOut, Send, Settings, Slash, Sparkles } from "lucide-reac
 import type { CardAction, ChatMessage, KamiyaAuthContext, KamiyaSavedChatSummary, KamiyaSessionState } from "../shared/types";
 import { slashCommands } from "../shared/commands";
 import { CommandMenu } from "./components/CommandMenu";
+import { GameMasterOnboarding } from "./components/GameMasterOnboarding";
 import { MessageBubble } from "./components/MessageBubble";
 import { SettingsPanel } from "./components/SettingsPanel";
 import { hydrateAction, listSavedChats, loadSavedChat, makeUserMessage, sendChatTurn } from "./lib/kamiyaApi";
@@ -374,6 +375,27 @@ export default function App() {
               Change
             </button>
           </div>
+        </div>
+
+        <GameMasterOnboarding
+          enabled={(session.presentationMode ?? "game_master") === "game_master"}
+          intensity={session.narrativeIntensity ?? "standard"}
+          stats={session.statDisplayMode ?? "both"}
+          onConfigure={() => void submitMessage("/game-master on")}
+        />
+
+        <div className="context-block">
+          <h2>Quest</h2>
+          {session.currentQuestProjectId ? (
+            <div className="mode-row">
+              <strong>Project {session.currentQuestProjectId}</strong>
+              <button className="secondary" type="button" onClick={() => void submitMessage(`/quest ${session.currentQuestProjectId}`)}>
+                Refresh
+              </button>
+            </div>
+          ) : (
+            <p>Open a quest with `/quest projectId` to see the party, chronicle, and launch controls.</p>
+          )}
         </div>
 
         <div className="context-block">

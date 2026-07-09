@@ -4,6 +4,8 @@ import {
   ExternalLink,
   FileCheck2,
   FolderKanban,
+  ScrollText,
+  Swords,
   ListChecks,
   Plug,
   Search,
@@ -40,7 +42,18 @@ const cardIcons = {
   workflow_failure: ShieldCheck,
   evidence: FileCheck2,
   review: FileCheck2,
-  review_assignment: ListChecks
+  review_assignment: ListChecks,
+  quest_scroll: ScrollText,
+  quest_portal: Sparkles,
+  quest_preview: ShieldCheck,
+  party_assembly: Swords,
+  character_calling: Sparkles,
+  quest_opening_scene: ScrollText,
+  encounter: Swords,
+  quest_ledger: ListChecks,
+  chronicle: ScrollText,
+  narrative_settings: Sparkles,
+  plain_mode: ShieldCheck
 };
 
 export function ResponseCard({ card, onAction, isBusy = false }: ResponseCardProps) {
