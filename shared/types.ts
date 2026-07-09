@@ -94,6 +94,7 @@ export type CardKind =
   | "timeline"
   | "workflow_progress"
   | "workflow_failure"
+  | "evidence"
   | "quest_summary"
   | "search_results"
   | "action_preview"
@@ -344,6 +345,61 @@ export interface TaskAutomationContext {
   policies?: Record<string, unknown>;
   action?: CerbanimoAction;
   template?: Record<string, unknown>;
+}
+
+export interface TaskEvidenceRequirement {
+  requirementId: string;
+  description?: string;
+  acceptedEvidenceTypes?: string[];
+  proofTypes?: string[];
+  checks?: string[];
+  minimumEvidenceItems?: number;
+  semanticReview?: boolean;
+}
+
+export interface TaskEvidenceItem {
+  id: number | string;
+  evidence_uuid?: string | null;
+  evidence_type: string;
+  requirement_ids?: string[];
+  title?: string | null;
+  text_content?: string | null;
+  source_url?: string | null;
+  canonical_url?: string | null;
+  artifact_uri?: string | null;
+  media_type?: string | null;
+  byte_size?: number | string | null;
+  content_sha256?: string;
+  metadata?: Record<string, unknown>;
+  created_at?: string | null;
+}
+
+export interface TaskEvidenceBundle {
+  id: number | string;
+  bundle_uuid?: string | null;
+  task_id?: number | string;
+  actor_user_id?: number | string | null;
+  source_kind?: "human" | "automation" | "mixed" | string;
+  status: string;
+  version?: number;
+  reflection?: string | null;
+  summary?: string | null;
+  requirement_snapshot?: TaskEvidenceRequirement[];
+  action_id?: number | string | null;
+  actionId?: string | null;
+  items?: TaskEvidenceItem[];
+  created_at?: string | null;
+  updated_at?: string | null;
+}
+
+export interface TaskEvidenceContext {
+  task?: CerbanimoTask;
+  requirements?: TaskEvidenceRequirement[];
+  bundle?: TaskEvidenceBundle;
+  bundles?: TaskEvidenceBundle[];
+  action?: CerbanimoAction | null;
+  validations?: Array<Record<string, unknown>>;
+  createdItemId?: number | string;
 }
 
 export interface AutomationRunResult {

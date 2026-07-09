@@ -182,6 +182,68 @@ describe("CerbanimoClient /api/v1 action contract", () => {
     expect(fetchMock.mock.calls[1][0]).toContain("/api/v1/automation/runs/88");
   });
 
+  it("loads task evidence through the v1 evidence endpoint", async () => {
+    const fetchMock = mockFetch({
+      ok: true,
+      data: taskEvidenceContext(),
+      error: null,
+      requestId: "req-evidence"
+    });
+
+    const result = await new CerbanimoClient(auth).taskEvidence(203);
+
+    expect(result.ok).toBe(true);
+    expect(result.data?.requirements?.[0].requirementId).toBe("proof");
+    expect(fetchMock.mock.calls[0][0]).toBe("http://localhost:4000/api/v1/tasks/203/evidence");
+  });
+
+  it("confirms evidence submissions through actions instead of legacy submit routes", async () => {
+    const fetchMock = vi
+      .fn()
+      .mockResolvedValueOnce(jsonResponse({
+        ok: true,
+        data: actionRow({
+          id: 99,
+          action_uuid: "evidence-action-99",
+          status: "confirmed",
+          intent_json: { functionName: "tasks.submit_evidence" },
+          related_task_id: 203,
+          related_automation_run_id: 1001
+        }),
+        error: null,
+        requestId: "req-confirm-evidence"
+      }, 202))
+      .mockResolvedValueOnce(jsonResponse({
+        ok: true,
+        data: evidenceValidationRunRow(),
+        error: null,
+        requestId: "req-validation-run"
+      }));
+    vi.stubGlobal("fetch", fetchMock);
+
+    const result = await new CerbanimoClient(auth).executeAction({
+      id: "local-evidence-preview",
+      kind: "submit_task",
+      title: "Submit evidence",
+      summary: "Validate evidence before review.",
+      risk: "low",
+      destructive: false,
+      payload: { taskId: 203, bundleId: "bundle-1" },
+      requiredPermissions: ["tasks:write", "actions:write"],
+      createdAt: "2026-07-02T12:00:00.000Z",
+      cerbanimoActionUuid: "evidence-action-99"
+    });
+
+    expect(result.ok).toBe(true);
+    expect((result.data as { automationRun?: { result?: { status?: string } } }).automationRun?.result?.status).toBe("validation_passed");
+    const urls = fetchMock.mock.calls.map((call) => String(call[0]));
+    expect(urls).toEqual([
+      "http://localhost:4000/api/v1/actions/evidence-action-99/confirm",
+      "http://localhost:4000/api/v1/automation/runs/1001"
+    ]);
+    expect(urls.some((url) => url.includes("/tasks/203/submit"))).toBe(false);
+  });
+
   it("formats object-shaped Cerbanimo errors without [object Object]", async () => {
     mockFetch({
       ok: false,
@@ -363,6 +425,43 @@ function automationRunRow() {
       summary: "Quality checks passed.",
       submittedTask: true,
       checks: [{ key: "build", status: "passed", message: "Build passed." }]
+    },
+    logs: []
+  };
+}
+
+function taskEvidenceContext() {
+  return {
+    task: { id: 203, name: "Run baseline repository quality checks", status: "active-unassigned" },
+    requirements: [{
+      requirementId: "proof",
+      description: "Show the work was completed.",
+      acceptedEvidenceTypes: ["text", "url_snapshot"],
+      checks: ["evidence_present", "reflection_present"]
+    }],
+    bundles: [{
+      id: 501,
+      bundle_uuid: "bundle-501",
+      task_id: 203,
+      status: "draft",
+      source_kind: "human",
+      items: []
+    }],
+    validations: []
+  };
+}
+
+function evidenceValidationRunRow() {
+  return {
+    id: 1001,
+    run_uuid: "validation-run-1001",
+    status: "completed",
+    template_key: "submission_validation",
+    result: {
+      status: "validation_passed",
+      summary: "Evidence validation passed.",
+      submittedTask: true,
+      requirementResults: [{ requirementId: "proof", verdict: "satisfied", description: "Show the work was completed." }]
     },
     logs: []
   };

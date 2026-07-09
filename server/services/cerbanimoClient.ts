@@ -11,6 +11,7 @@ import type {
   KamiyaSavedChatSummary,
   KamiyaSessionState,
   ProjectBootstrapActionDetail,
+  TaskEvidenceContext,
   TaskAutomationContext
 } from "../../shared/types";
 
@@ -189,6 +190,61 @@ const taskAutomationContextSchema = z.object({
   policies: z.record(z.unknown()).optional(),
   action: cerbanimoActionSchema.optional(),
   template: z.record(z.unknown()).optional()
+}).passthrough();
+
+const taskEvidenceRequirementSchema = z.object({
+  requirementId: z.string(),
+  description: z.string().optional(),
+  acceptedEvidenceTypes: z.array(z.string()).optional().catch([]),
+  proofTypes: z.array(z.string()).optional().catch([]),
+  checks: z.array(z.string()).optional().catch([]),
+  minimumEvidenceItems: z.number().optional(),
+  semanticReview: z.boolean().optional()
+}).passthrough();
+
+const taskEvidenceItemSchema = z.object({
+  id: z.union([z.number(), z.string()]),
+  evidence_uuid: z.string().optional().nullable(),
+  evidence_type: z.string(),
+  requirement_ids: z.array(z.string()).optional().catch([]),
+  title: z.string().optional().nullable(),
+  text_content: z.string().optional().nullable(),
+  source_url: z.string().optional().nullable(),
+  canonical_url: z.string().optional().nullable(),
+  artifact_uri: z.string().optional().nullable(),
+  media_type: z.string().optional().nullable(),
+  byte_size: z.union([z.number(), z.string()]).optional().nullable(),
+  content_sha256: z.string().optional(),
+  metadata: z.record(z.unknown()).optional(),
+  created_at: z.string().optional().nullable()
+}).passthrough();
+
+const taskEvidenceBundleSchema = z.object({
+  id: z.union([z.number(), z.string()]),
+  bundle_uuid: z.string().optional().nullable(),
+  task_id: z.union([z.number(), z.string()]).optional(),
+  actor_user_id: z.union([z.number(), z.string()]).optional().nullable(),
+  source_kind: z.string().optional(),
+  status: z.string(),
+  version: z.number().optional(),
+  reflection: z.string().optional().nullable(),
+  summary: z.string().optional().nullable(),
+  requirement_snapshot: z.array(taskEvidenceRequirementSchema).optional(),
+  action_id: z.union([z.number(), z.string()]).optional().nullable(),
+  actionId: z.string().optional().nullable(),
+  items: z.array(taskEvidenceItemSchema).optional().default([]),
+  created_at: z.string().optional().nullable(),
+  updated_at: z.string().optional().nullable()
+}).passthrough();
+
+const taskEvidenceContextSchema = z.object({
+  task: taskSchema.optional(),
+  requirements: z.array(taskEvidenceRequirementSchema).optional().default([]),
+  bundle: taskEvidenceBundleSchema.optional(),
+  bundles: z.array(taskEvidenceBundleSchema).optional(),
+  action: cerbanimoActionSchema.optional().nullable(),
+  validations: z.array(z.record(z.unknown())).optional().default([]),
+  createdItemId: z.union([z.number(), z.string()]).optional()
 }).passthrough();
 
 const automationRunSchema = z.object({
@@ -372,6 +428,75 @@ export class CerbanimoClient {
     ) as Promise<CerbanimoResult<TaskAutomationContext>>;
   }
 
+  async taskEvidence(taskId: string | number): Promise<CerbanimoResult<TaskEvidenceContext>> {
+    return this.requestV1(
+      `/tasks/${encodeURIComponent(String(taskId))}/evidence`,
+      "GET",
+      undefined,
+      taskEvidenceContextSchema
+    ) as Promise<CerbanimoResult<TaskEvidenceContext>>;
+  }
+
+  async createEvidenceBundle(
+    taskId: string | number,
+    input: { reflection?: string; summary?: string; sourceKind?: string } = {}
+  ): Promise<CerbanimoResult<TaskEvidenceContext>> {
+    return this.requestV1(
+      `/tasks/${encodeURIComponent(String(taskId))}/evidence/bundles`,
+      "POST",
+      input,
+      taskEvidenceContextSchema
+    ) as Promise<CerbanimoResult<TaskEvidenceContext>>;
+  }
+
+  async updateEvidenceBundle(
+    taskId: string | number,
+    bundleId: string | number,
+    input: { reflection?: string; summary?: string; sourceKind?: string }
+  ): Promise<CerbanimoResult<TaskEvidenceContext>> {
+    return this.requestV1(
+      `/tasks/${encodeURIComponent(String(taskId))}/evidence/bundles/${encodeURIComponent(String(bundleId))}`,
+      "PATCH",
+      input,
+      taskEvidenceContextSchema
+    ) as Promise<CerbanimoResult<TaskEvidenceContext>>;
+  }
+
+  async addEvidenceItem(
+    taskId: string | number,
+    bundleId: string | number,
+    item: Record<string, unknown>
+  ): Promise<CerbanimoResult<TaskEvidenceContext>> {
+    return this.requestV1(
+      `/tasks/${encodeURIComponent(String(taskId))}/evidence/bundles/${encodeURIComponent(String(bundleId))}/items`,
+      "POST",
+      item,
+      taskEvidenceContextSchema
+    ) as Promise<CerbanimoResult<TaskEvidenceContext>>;
+  }
+
+  async fetchEvidenceUrl(
+    taskId: string | number,
+    bundleId: string | number,
+    input: { url: string; requirementIds?: string[]; title?: string }
+  ): Promise<CerbanimoResult<TaskEvidenceContext>> {
+    return this.requestV1(
+      `/tasks/${encodeURIComponent(String(taskId))}/evidence/bundles/${encodeURIComponent(String(bundleId))}/fetch-url`,
+      "POST",
+      input,
+      taskEvidenceContextSchema
+    ) as Promise<CerbanimoResult<TaskEvidenceContext>>;
+  }
+
+  async previewEvidenceBundle(taskId: string | number, bundleId: string | number): Promise<CerbanimoResult<TaskEvidenceContext>> {
+    return this.requestV1(
+      `/tasks/${encodeURIComponent(String(taskId))}/evidence/bundles/${encodeURIComponent(String(bundleId))}/preview`,
+      "POST",
+      { sourceClient: "kamiya-web" },
+      taskEvidenceContextSchema
+    ) as Promise<CerbanimoResult<TaskEvidenceContext>>;
+  }
+
   async getAutomationRun(runId: string | number): Promise<CerbanimoResult<AutomationRun>> {
     return this.requestV1(
       `/automation/runs/${encodeURIComponent(String(runId))}`,
@@ -404,8 +529,23 @@ export class CerbanimoClient {
     }
 
     if (action.kind === "submit_task") {
-      const taskId = String(action.payload.taskId ?? "");
-      return this.request(`/tasks/${encodeURIComponent(taskId)}/submit`, "POST", action.payload);
+      const actionId = action.cerbanimoActionUuid ?? action.cerbanimoActionId;
+      if (!actionId) {
+        return {
+          ok: false,
+          error: "Kamiya cannot submit this task because Cerbanimo did not return an evidence action preview. Add evidence and preview the submission again."
+        };
+      }
+      const confirmed = await this.confirmAction(actionId);
+      if (!confirmed.ok || !confirmed.data) return confirmed;
+      const runId = confirmed.data.related_automation_run_id ?? automationRunIdFromExecutionResult(confirmed.data.execution_result);
+      if (!runId) {
+        return { ok: true, data: { action: confirmed.data }, requestId: confirmed.requestId };
+      }
+      const run = await this.hydrateAutomationRunAfterConfirm(runId);
+      return run.ok
+        ? { ok: true, data: { action: confirmed.data, automationRun: run.data }, requestId: run.requestId ?? confirmed.requestId }
+        : { ok: true, data: { action: confirmed.data, automationRunError: run.error }, requestId: confirmed.requestId };
     }
 
     if (action.kind === "run_automation") {

@@ -82,22 +82,6 @@ export function previewAutomation(intent: RoutedIntent, message: string): Action
   };
 }
 
-export function previewTaskSubmission(message: string): ActionPreview {
-  return {
-    id: crypto.randomUUID(),
-    kind: "submit_task",
-    title: "Submit completed task",
-    summary: "Kamiya will submit proof for a Cerbanimo task after you confirm the task and proof details.",
-    risk: "low",
-    destructive: false,
-    payload: {
-      rawRequest: message
-    },
-    requiredPermissions: ["tasks:submit"],
-    createdAt: new Date().toISOString()
-  };
-}
-
 export function detectAutomationWorkflow(message: string): AutomationWorkflowKind {
   const lower = message.toLowerCase();
   if (/\bcompetitor|market research|research\b/.test(lower)) return "research_competitors";

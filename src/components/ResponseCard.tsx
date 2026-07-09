@@ -2,6 +2,7 @@ import {
   BarChart3,
   CheckCircle2,
   ExternalLink,
+  FileCheck2,
   FolderKanban,
   ListChecks,
   Plug,
@@ -36,7 +37,8 @@ const cardIcons = {
   approval: ShieldCheck,
   timeline: BarChart3,
   workflow_progress: Workflow,
-  workflow_failure: ShieldCheck
+  workflow_failure: ShieldCheck,
+  evidence: FileCheck2
 };
 
 export function ResponseCard({ card, onAction, isBusy = false }: ResponseCardProps) {

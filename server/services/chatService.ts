@@ -13,6 +13,7 @@ import {
   automationRunResultCard,
   automationTemplatesCard,
   activeTaskCard,
+  evidenceBundleCard,
   integrationCard,
   helpCard,
   navigationCard,
@@ -30,7 +31,7 @@ import {
   workflowProgressCard
 } from "./cardFactory";
 import { CerbanimoClient } from "./cerbanimoClient";
-import { previewAutomation, previewProjectCreation, previewTaskSubmission } from "./actionPlanner";
+import { previewAutomation, previewProjectCreation } from "./actionPlanner";
 import { routeIntent } from "./intentRouter";
 import { analyzePlanning } from "./planningService";
 import { parseModeCommand, shouldShowModes } from "./modeService";
@@ -73,6 +74,11 @@ async function buildChatTurnResponse(request: ChatTurnRequest): Promise<ChatTurn
 
   if (taskAutomationCommand?.kind === "quality_checks") {
     return reviewQualityChecks(request, taskAutomationCommand.taskId);
+  }
+
+  const evidenceCommand = parseTaskEvidenceCommand(message);
+  if (evidenceCommand) {
+    return handleTaskEvidenceCommand(request, evidenceCommand);
   }
 
   if (/^view required inputs\b/i.test(message) && request.session.activeAction?.actionId) {
@@ -171,13 +177,15 @@ async function buildChatTurnResponse(request: ChatTurnRequest): Promise<ChatTurn
   }
 
   if (intent.next_action === "submit_task") {
-    const action = previewTaskSubmission(message);
-    return respond(
-      "I can prepare that task submission. Confirm when the task and proof look right.",
-      { ...request.session, pendingAction: action },
-      intent,
-      [actionPreviewCard(action)]
-    );
+    const taskId = taskIdFromMessageOrIntent(message, intent);
+    if (!taskId) {
+      return respond(
+        "I can help submit task evidence, but I need the Cerbanimo task id first.",
+        request.session,
+        intent
+      );
+    }
+    return startEvidenceSubmission(request, taskId, intent);
   }
 
   if (intent.next_action === "queue_automation") {
@@ -542,7 +550,11 @@ async function executePendingAction(request: ChatTurnRequest): Promise<ChatTurnR
     id: crypto.randomUUID(),
     previewId: action.id,
     kind: action.kind,
-    status: taskWaitTimedOut ? ("failed" as const) : action.kind === "run_automation" ? automationHistoryStatus(automationRun) : ("completed" as const),
+    status: taskWaitTimedOut
+      ? ("failed" as const)
+      : action.kind === "run_automation" || action.kind === "submit_task"
+        ? automationHistoryStatus(automationRun)
+        : ("completed" as const),
     title: action.title,
     summary: action.summary,
     createdAt: new Date().toISOString(),
@@ -555,6 +567,8 @@ async function executePendingAction(request: ChatTurnRequest): Promise<ChatTurnR
   return respond(
     action.kind === "run_automation" && automationRun
       ? automationConfirmationMessage(automationRun)
+      : action.kind === "submit_task" && automationRun
+        ? evidenceConfirmationMessage(automationRun)
       : result.mocked
       ? "Confirmed. I simulated the Cerbanimo call because live API credentials are not configured yet."
       : "Confirmed. I sent the action to Cerbanimo and logged the result.",
@@ -568,9 +582,128 @@ async function executePendingAction(request: ChatTurnRequest): Promise<ChatTurnR
     },
     undefined,
     [
-      ...(action.kind === "run_automation" && isAutomationRunRecord(automationRun) ? [automationRunResultCard(automationRun)] : []),
+      ...((action.kind === "run_automation" || action.kind === "submit_task") && isAutomationRunRecord(automationRun) ? [automationRunResultCard(automationRun)] : []),
       actionQueueCard(actionHistory, result.mocked)
     ]
+  );
+}
+
+type TaskEvidenceCommand =
+  | { kind: "requirements" | "start" | "preview"; taskId: string }
+  | { kind: "add_text"; taskId: string; text: string }
+  | { kind: "fetch_url"; taskId: string; url: string };
+
+async function handleTaskEvidenceCommand(request: ChatTurnRequest, command: TaskEvidenceCommand): Promise<ChatTurnResponse> {
+  if (command.kind === "requirements") return showEvidenceRequirements(request, command.taskId);
+  if (command.kind === "start") return startEvidenceSubmission(request, command.taskId);
+  if (command.kind === "add_text") return addTextEvidence(request, command.taskId, command.text);
+  if (command.kind === "fetch_url") return addUrlEvidence(request, command.taskId, command.url);
+  return previewEvidenceSubmission(request, command.taskId);
+}
+
+async function showEvidenceRequirements(
+  request: ChatTurnRequest,
+  taskId: string,
+  intent?: ChatMessage["intent"]
+): Promise<ChatTurnResponse> {
+  const result = await new CerbanimoClient(request.auth).taskEvidence(taskId);
+  if (!result.ok || !result.data) {
+    return respond(`I could not load task evidence requirements from Cerbanimo: ${result.error}`, request.session, intent);
+  }
+  return respond(
+    "Cerbanimo returned the evidence requirements for that task.",
+    request.session,
+    intent,
+    [evidenceBundleCard(result.data, "Evidence requirements")]
+  );
+}
+
+async function startEvidenceSubmission(
+  request: ChatTurnRequest,
+  taskId: string,
+  intent?: ChatMessage["intent"]
+): Promise<ChatTurnResponse> {
+  const cerbanimo = new CerbanimoClient(request.auth);
+  const created = await cerbanimo.createEvidenceBundle(taskId);
+  if (!created.ok || !created.data) {
+    return respond(`I could not start an evidence draft in Cerbanimo: ${created.error}`, request.session, intent);
+  }
+  const requirements = await cerbanimo.taskEvidence(taskId);
+  const context = {
+    ...(requirements.data ?? {}),
+    ...(created.data ?? {}),
+    requirements: requirements.data?.requirements ?? created.data.requirements ?? []
+  };
+  return respond(
+    "I started a Cerbanimo evidence draft for that task.",
+    request.session,
+    intent,
+    [evidenceBundleCard(context, "Task evidence draft")]
+  );
+}
+
+async function addTextEvidence(request: ChatTurnRequest, taskId: string, text: string): Promise<ChatTurnResponse> {
+  const cerbanimo = new CerbanimoClient(request.auth);
+  const created = await cerbanimo.createEvidenceBundle(taskId, {
+    reflection: text.slice(0, 2000)
+  });
+  if (!created.ok || !created.data?.bundle) {
+    return respond(`I could not prepare the evidence draft in Cerbanimo: ${created.error}`, request.session);
+  }
+  const added = await cerbanimo.addEvidenceItem(taskId, created.data.bundle.bundle_uuid ?? created.data.bundle.id, {
+    evidenceType: "text",
+    title: "Submitted text evidence",
+    textContent: text
+  });
+  if (!added.ok || !added.data) {
+    return respond(`Cerbanimo could not save that evidence: ${added.error}`, request.session, undefined, [evidenceBundleCard(created.data, "Task evidence draft")]);
+  }
+  return respond(
+    "I saved that evidence in Cerbanimo. Preview the submission when the bundle looks complete.",
+    request.session,
+    undefined,
+    [evidenceBundleCard(added.data, "Task evidence draft")]
+  );
+}
+
+async function addUrlEvidence(request: ChatTurnRequest, taskId: string, url: string): Promise<ChatTurnResponse> {
+  const cerbanimo = new CerbanimoClient(request.auth);
+  const created = await cerbanimo.createEvidenceBundle(taskId);
+  if (!created.ok || !created.data?.bundle) {
+    return respond(`I could not prepare the evidence draft in Cerbanimo: ${created.error}`, request.session);
+  }
+  const added = await cerbanimo.fetchEvidenceUrl(taskId, created.data.bundle.bundle_uuid ?? created.data.bundle.id, { url });
+  if (!added.ok || !added.data) {
+    return respond(`Cerbanimo could not snapshot that URL as evidence: ${added.error}`, request.session, undefined, [evidenceBundleCard(created.data, "Task evidence draft")]);
+  }
+  return respond(
+    "I saved a bounded snapshot of that URL as Cerbanimo evidence.",
+    request.session,
+    undefined,
+    [evidenceBundleCard(added.data, "Task evidence draft")]
+  );
+}
+
+async function previewEvidenceSubmission(request: ChatTurnRequest, taskId: string): Promise<ChatTurnResponse> {
+  const cerbanimo = new CerbanimoClient(request.auth);
+  const current = await cerbanimo.taskEvidence(taskId);
+  const existing = current.data?.bundles?.find((bundle) => ["draft", "previewed"].includes(String(bundle.status)));
+  const created = existing
+    ? { ok: true as const, data: { ...(current.data ?? {}), bundle: existing } }
+    : await cerbanimo.createEvidenceBundle(taskId);
+  if (!created.ok || !created.data?.bundle) {
+    return respond(`I could not prepare the evidence draft in Cerbanimo: ${created.ok ? "No editable bundle was returned." : created.error}`, request.session);
+  }
+  const preview = await cerbanimo.previewEvidenceBundle(taskId, created.data.bundle.bundle_uuid ?? created.data.bundle.id);
+  if (!preview.ok || !preview.data?.action) {
+    return respond(`Cerbanimo could not create an evidence submission preview: ${preview.error}`, request.session, undefined, [evidenceBundleCard(created.data, "Task evidence draft")]);
+  }
+  const action = evidencePreviewFromContext(preview.data, taskId);
+  return respond(
+    "I prepared the Cerbanimo evidence submission preview. Confirm only when the evidence bundle is ready for validation.",
+    { ...request.session, pendingAction: action },
+    undefined,
+    [evidenceBundleCard(preview.data, "Evidence submission preview"), actionPreviewCard(action)]
   );
 }
 
@@ -586,6 +719,58 @@ function parseTaskAutomationCommand(message: string): { kind: "prepare" | "quali
   }
 
   return undefined;
+}
+
+function parseTaskEvidenceCommand(message: string): TaskEvidenceCommand | undefined {
+  const trimmed = message.trim();
+  const requirements = trimmed.match(/^(?:view\s+)?(?:evidence\s+requirements|requirements\s+for\s+evidence)\s+(\S+)$/i);
+  if (requirements?.[1]) return { kind: "requirements", taskId: requirements[1] };
+
+  const preview = trimmed.match(/^preview\s+evidence(?:\s+submission)?\s+(\S+)$/i);
+  if (preview?.[1]) return { kind: "preview", taskId: preview[1] };
+
+  const addUrl = trimmed.match(/^(?:add|fetch)\s+(?:url\s+)?evidence(?:\s+url)?\s+(\S+)\s+(https?:\/\/\S+)$/i)
+    ?? trimmed.match(/^submit\s+(?:evidence|task)\s+(\S+)\s+(https?:\/\/\S+)$/i);
+  if (addUrl?.[1] && addUrl[2]) return { kind: "fetch_url", taskId: addUrl[1], url: addUrl[2] };
+
+  const addText = trimmed.match(/^(?:add\s+(?:text\s+)?evidence|proof)\s+(\S+)\s+([\s\S]+)$/i)
+    ?? trimmed.match(/^submit\s+(?:evidence|task)\s+(\S+)\s+([\s\S]+)$/i);
+  if (addText?.[1] && addText[2]) return { kind: "add_text", taskId: addText[1], text: addText[2].trim() };
+
+  const start = trimmed.match(/^(?:\/submit|submit\s+(?:evidence|task)|start\s+evidence)\s+(\S+)$/i);
+  if (start?.[1]) return { kind: "start", taskId: start[1] };
+
+  return undefined;
+}
+
+function taskIdFromMessageOrIntent(message: string, intent?: ChatMessage["intent"]): string | undefined {
+  const fromEntity = intent?.entities?.taskId ?? intent?.entities?.task_id ?? intent?.entities?.task;
+  if (typeof fromEntity === "string" || typeof fromEntity === "number") return String(fromEntity);
+  const match = message.match(/\b(?:task|submit|evidence)\s+#?(\d+)\b/i) ?? message.match(/^\/submit\s+(\S+)/i);
+  return match?.[1];
+}
+
+function evidencePreviewFromContext(context: Parameters<typeof evidenceBundleCard>[0], taskId: string): NonNullable<ChatTurnResponse["session"]["pendingAction"]> {
+  const action = context.action;
+  const bundle = context.bundle;
+  const previewPayload = action?.preview_payload ?? {};
+  return {
+    id: crypto.randomUUID(),
+    kind: "submit_task",
+    title: String(previewPayload.title ?? `Submit evidence for task ${taskId}`),
+    summary: String(previewPayload.summary ?? "Cerbanimo will freeze the evidence bundle and validate it before moving the task to review."),
+    risk: normalizeRisk(action?.risk_level),
+    destructive: false,
+    payload: {
+      taskId,
+      bundleId: bundle?.bundle_uuid ?? bundle?.id
+    },
+    requiredPermissions: ["tasks:write", "actions:write"],
+    createdAt: String(action?.created_at ?? new Date().toISOString()),
+    cerbanimoActionId: action ? String(action.id) : undefined,
+    cerbanimoActionUuid: action?.action_uuid ?? undefined,
+    functionName: "tasks.submit_evidence"
+  };
 }
 
 function parseKeyValueInputs(value: string): Record<string, unknown> {
@@ -655,6 +840,18 @@ function automationConfirmationMessage(value: unknown): string {
   if (status === "blocked" || status === "failed") return "Confirmed, but Cerbanimo says this automation needs attention before it can finish.";
   if (status === "cancelled") return "Cerbanimo shows this automation run as cancelled.";
   return "Confirmed. Cerbanimo queued the automation run. The run card below is the source of truth while the worker processes it.";
+}
+
+function evidenceConfirmationMessage(value: unknown): string {
+  if (!isAutomationRunRecord(value)) return "Confirmed. Cerbanimo accepted the evidence submission, but the validation run was not available yet.";
+  const resultStatus = value.result && typeof value.result === "object" && !Array.isArray(value.result)
+    ? String((value.result as Record<string, unknown>).status ?? "")
+    : "";
+  if (resultStatus === "validation_passed") return "Confirmed. Cerbanimo validated the evidence and moved the task into review.";
+  if (resultStatus === "needs_more_evidence") return "Confirmed. Cerbanimo validated the bundle and needs more evidence before review.";
+  if (resultStatus === "manual_review_required") return "Confirmed. Cerbanimo queued the evidence for manual validation review.";
+  if (resultStatus === "validation_failed") return "Confirmed, but Cerbanimo rejected the evidence during validation.";
+  return "Confirmed. Cerbanimo queued the evidence validation run. The validation card below is the source of truth while the worker processes it.";
 }
 
 function respond(

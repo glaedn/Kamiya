@@ -7,6 +7,7 @@ import type {
   PlanningDraft,
   ProjectBootstrapActionDetail,
   ResponseCard,
+  TaskEvidenceContext,
   TaskAutomationContext
 } from "../../shared/types";
 import { agentModes } from "./modeService";
@@ -195,7 +196,11 @@ export function activeTaskCard(tasks: CerbanimoTask[]): ResponseCard {
   const counts = classificationCounts(tasks);
   const assistedTask = tasks.find((task) => task.automation?.classification === "assisted_automation");
   const qualityTask = tasks.find((task) => (task.automation?.requirements?.capabilities ?? []).includes("github.run_quality_checks"));
+  const firstTask = tasks[0];
   const actions = [
+    ...(firstTask
+      ? [{ id: "submit-evidence", label: "Submit evidence", style: "primary" as const, command: `submit evidence ${firstTask.id}` }]
+      : []),
     ...(assistedTask
       ? [{ id: "prepare-assisted-task", label: "Prepare with Kamiya", style: "secondary" as const, command: `prepare task automation ${assistedTask.id}` }]
       : []),
@@ -238,6 +243,56 @@ export function activeTaskCard(tasks: CerbanimoTask[]): ResponseCard {
       }
     })),
     actions: actions.length ? actions : undefined
+  };
+}
+
+export function evidenceBundleCard(context: TaskEvidenceContext, title = "Task evidence"): ResponseCard {
+  const bundle = context.bundle ?? context.bundles?.[0];
+  const requirements = context.requirements ?? bundle?.requirement_snapshot ?? [];
+  const items = bundle?.items ?? [];
+  const taskId = String(bundle?.task_id ?? context.task?.id ?? "");
+  const bundleId = String(bundle?.bundle_uuid ?? bundle?.id ?? "");
+  const actionId = context.action?.action_uuid ?? (context.action?.id ? String(context.action.id) : undefined);
+  const status = String(bundle?.status ?? "not started");
+
+  return {
+    id: `evidence-${taskId || crypto.randomUUID()}-${bundleId || "context"}`,
+    kind: "evidence",
+    title,
+    subtitle: status,
+    body: bundle
+      ? `Cerbanimo has ${items.length} evidence item${items.length === 1 ? "" : "s"} saved for this task.`
+      : "Cerbanimo returned the validation requirements for this task.",
+    metadata: {
+      taskId,
+      bundleId,
+      itemCount: items.length,
+      requirementCount: requirements.length,
+      actionId: actionId ?? "",
+      reflection: bundle?.reflection ? "present" : "missing"
+    },
+    items: [
+      ...requirements.map((requirement) => ({
+        id: requirement.requirementId,
+        title: requirement.description || requirement.requirementId,
+        subtitle: (requirement.acceptedEvidenceTypes ?? requirement.proofTypes ?? []).join(", ") || "Any accepted proof",
+        status: (requirement.checks ?? []).join(", ") || "evidence_present"
+      })),
+      ...items.map((item) => ({
+        id: String(item.evidence_uuid ?? item.id),
+        title: item.title || item.evidence_type,
+        subtitle: item.source_url ?? item.artifact_uri ?? item.text_content ?? "",
+        status: item.evidence_type,
+        metadata: {
+          hash: String(item.content_sha256 ?? "").slice(0, 12),
+          requirements: (item.requirement_ids ?? []).join(", ") || "all"
+        }
+      }))
+    ],
+    actions: [
+      ...(bundle && status === "draft" ? [{ id: "preview-evidence", label: "Preview submission", style: "primary" as const, command: `preview evidence ${taskId}` }] : []),
+      ...(actionId ? [{ id: "confirm-evidence", label: "Confirm submission", style: "primary" as const, actionId }] : [])
+    ]
   };
 }
 
@@ -329,17 +384,35 @@ export function taskAutomationPreparationCard(context: TaskAutomationContext): R
 
 export function automationRunResultCard(run: AutomationRun): ResponseCard {
   const result = normalizeAutomationRunResult(run.result);
-  const checks = Array.isArray(result.checks) ? result.checks : [];
+  const resultRecord = result as AutomationRunResult & { requirementResults?: Array<Record<string, unknown>> };
+  const checks = Array.isArray(result.checks)
+    ? result.checks
+    : Array.isArray(resultRecord.requirementResults)
+      ? resultRecord.requirementResults.map((requirement) => ({
+          key: requirement.requirementId,
+          status: requirement.verdict,
+          message: requirement.description
+        }))
+      : [];
   const runStatus = String(run.status ?? "queued");
   const actionId = run.action_id ? String(run.action_id) : undefined;
   const retryable = Boolean(run.allowedActions?.retry);
   const cancellable = Boolean(run.allowedActions?.cancel);
+  const validationStatus = String(result.status ?? "");
 
   return {
     id: `automation-run-${run.run_uuid ?? run.id}`,
     kind: "validation_report",
     title: runStatus === "queued" || runStatus === "running"
       ? "Automation run queued"
+      : validationStatus === "validation_passed"
+        ? "Evidence validation passed"
+        : validationStatus === "needs_more_evidence"
+          ? "Evidence needs more detail"
+          : validationStatus === "manual_review_required"
+            ? "Evidence needs manual review"
+            : validationStatus === "validation_failed"
+              ? "Evidence validation failed"
       : result.status === "checks_passed"
         ? "Quality checks passed"
         : result.status === "checks_failed"

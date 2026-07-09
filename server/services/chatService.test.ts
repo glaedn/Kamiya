@@ -274,6 +274,70 @@ describe("handleChatTurn", () => {
       "http://localhost:4000/api/v1/automation/runs/88"
     ]);
   });
+
+  it("previews and confirms task evidence through Cerbanimo validation", async () => {
+    const fetchMock = vi
+      .fn()
+      .mockResolvedValueOnce(jsonResponse({
+        ok: true,
+        data: taskEvidenceContext(),
+        error: null,
+        requestId: "req-evidence"
+      }))
+      .mockResolvedValueOnce(jsonResponse({
+        ok: true,
+        data: taskEvidenceContext({
+          action: evidenceActionRow({ status: "previewed" }),
+          bundle: evidenceBundle({ status: "previewed", action_id: 99 })
+        }),
+        error: null,
+        requestId: "req-preview-evidence"
+      }, 201))
+      .mockResolvedValueOnce(jsonResponse({
+        ok: true,
+        data: evidenceActionRow({ status: "confirmed", related_automation_run_id: 1001 }),
+        error: null,
+        requestId: "req-confirm-evidence"
+      }, 202))
+      .mockResolvedValueOnce(jsonResponse({
+        ok: true,
+        data: evidenceValidationRunRow(),
+        error: null,
+        requestId: "req-validation"
+      }));
+    vi.stubGlobal("fetch", fetchMock);
+
+    const auth = cerbanimoAuth();
+    const preview = await handleChatTurn({
+      message: "preview evidence 203",
+      history: [],
+      session: {},
+      auth,
+      channel: "sdk"
+    });
+
+    expect(preview.message.content).toContain("evidence submission preview");
+    expect(preview.session.pendingAction?.kind).toBe("submit_task");
+    expect(preview.session.pendingAction?.cerbanimoActionId).toBe("99");
+    expect(JSON.stringify(preview.message.cards)).toContain("Evidence submission preview");
+
+    const confirmed = await handleChatTurn({
+      message: "confirm",
+      history: [],
+      session: preview.session,
+      auth,
+      channel: "sdk"
+    });
+
+    expect(confirmed.message.content).toContain("moved the task into review");
+    expect(JSON.stringify(confirmed.message.cards)).toContain("Evidence validation passed");
+    expect(fetchMock.mock.calls.map((call) => String(call[0]))).toEqual([
+      "http://localhost:4000/api/v1/tasks/203/evidence",
+      "http://localhost:4000/api/v1/tasks/203/evidence/bundles/bundle-501/preview",
+      "http://localhost:4000/api/v1/actions/evidence-action-99/confirm",
+      "http://localhost:4000/api/v1/automation/runs/1001"
+    ]);
+  });
 });
 
 function cerbanimoAuth() {
@@ -468,6 +532,77 @@ function automationRunRow() {
       summary: "Quality checks passed.",
       submittedTask: true,
       checks: [{ key: "build", status: "passed", message: "Build passed." }]
+    },
+    logs: []
+  };
+}
+
+function evidenceBundle(overrides: Record<string, unknown> = {}) {
+  return {
+    id: 501,
+    bundle_uuid: "bundle-501",
+    task_id: 203,
+    status: "draft",
+    source_kind: "human",
+    reflection: "I completed the work and attached proof.",
+    items: [{
+      id: 700,
+      evidence_uuid: "item-700",
+      evidence_type: "text",
+      title: "Submitted text evidence",
+      text_content: "The implementation is complete.",
+      content_sha256: "abc123",
+      requirement_ids: []
+    }],
+    ...overrides
+  };
+}
+
+function taskEvidenceContext(overrides: Record<string, unknown> = {}) {
+  return {
+    task: { id: 203, name: "Run baseline repository quality checks", status: "active-unassigned" },
+    requirements: [{
+      requirementId: "proof",
+      description: "Show the work was completed.",
+      acceptedEvidenceTypes: ["text", "url_snapshot"],
+      checks: ["evidence_present", "reflection_present"]
+    }],
+    bundles: [evidenceBundle()],
+    bundle: evidenceBundle(),
+    validations: [],
+    ...overrides
+  };
+}
+
+function evidenceActionRow(overrides: Record<string, unknown> = {}) {
+  return {
+    id: 99,
+    action_uuid: "evidence-action-99",
+    status: "previewed",
+    risk_level: "normal",
+    intent_json: { functionName: "tasks.submit_evidence" },
+    preview_payload: {
+      title: "Submit evidence for task: Run baseline repository quality checks",
+      summary: "Cerbanimo will freeze 1 evidence item and validate it before handing the task to peer/PM review."
+    },
+    related_task_id: 203,
+    related_automation_run_id: null,
+    created_at: "2026-07-02T12:00:00.000Z",
+    ...overrides
+  };
+}
+
+function evidenceValidationRunRow() {
+  return {
+    id: 1001,
+    run_uuid: "validation-run-1001",
+    status: "completed",
+    template_key: "submission_validation",
+    result: {
+      status: "validation_passed",
+      summary: "Evidence validation passed.",
+      submittedTask: true,
+      requirementResults: [{ requirementId: "proof", verdict: "satisfied", description: "Show the work was completed." }]
     },
     logs: []
   };
