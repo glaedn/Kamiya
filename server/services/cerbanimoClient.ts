@@ -417,10 +417,10 @@ export class CerbanimoClient {
           };
         }
 
-        const run = await this.pollAutomationRun(runId);
+        const run = await this.getAutomationRun(runId);
         return run.ok
           ? { ok: true, data: { action: confirmed.data, automationRun: run.data }, requestId: run.requestId ?? confirmed.requestId }
-          : { ...run, data: { action: confirmed.data } };
+          : { ok: true, data: { action: confirmed.data, automationRunError: run.error }, requestId: confirmed.requestId };
       }
       return this.request("/automation/actions", "POST", action.payload);
     }
@@ -751,27 +751,6 @@ export class CerbanimoClient {
     };
   }
 
-  private async pollAutomationRun(runId: string | number): Promise<CerbanimoResult<AutomationRun>> {
-    const terminalStatuses = new Set(["completed", "failed", "blocked", "cancelled"]);
-    const timeoutMs = Number(process.env.KAMIYA_AUTOMATION_RUN_POLL_TIMEOUT_MS ?? 30_000);
-    const deadline = Date.now() + Math.max(1_000, timeoutMs);
-    let last: CerbanimoResult<AutomationRun> | undefined;
-    let attempt = 0;
-    while (Date.now() < deadline) {
-      last = await this.getAutomationRun(runId);
-      if (!last.ok) return last;
-      if (last.data && terminalStatuses.has(String(last.data.status))) return last;
-      attempt += 1;
-      await delay(Math.min(1200, 300 + attempt * 150));
-    }
-    return {
-      ok: false,
-      error: "Cerbanimo did not finish the automation run within 30 seconds. Retry from the action preview after checking the run state.",
-      code: "AUTOMATION_RUN_TIMEOUT",
-      retryable: true,
-      data: last?.data
-    };
-  }
 }
 
 function isRecord(value: unknown): value is Record<string, unknown> {
@@ -832,8 +811,4 @@ function automationRunIdFromExecutionResult(value: unknown): number | string | u
   if (!isRecord(value)) return undefined;
   const runId = value.automationRunId ?? value.automation_run_id;
   return typeof runId === "number" || typeof runId === "string" ? runId : undefined;
-}
-
-function delay(ms: number): Promise<void> {
-  return new Promise((resolve) => setTimeout(resolve, ms));
 }

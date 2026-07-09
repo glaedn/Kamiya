@@ -330,13 +330,29 @@ export function taskAutomationPreparationCard(context: TaskAutomationContext): R
 export function automationRunResultCard(run: AutomationRun): ResponseCard {
   const result = normalizeAutomationRunResult(run.result);
   const checks = Array.isArray(result.checks) ? result.checks : [];
+  const runStatus = String(run.status ?? "queued");
+  const actionId = run.action_id ? String(run.action_id) : undefined;
+  const retryable = ["blocked", "failed", "retry_wait"].includes(runStatus);
+  const cancellable = ["queued", "running", "retry_wait", "blocked", "failed"].includes(runStatus);
 
   return {
     id: `automation-run-${run.run_uuid ?? run.id}`,
     kind: "validation_report",
-    title: result.status === "checks_passed" ? "Quality checks passed" : result.status === "checks_failed" ? "Quality checks failed" : "Automation run result",
-    subtitle: String(run.status ?? "completed"),
-    body: result.summary ?? result.message ?? "Cerbanimo returned an automation run report.",
+    title: runStatus === "queued" || runStatus === "running"
+      ? "Automation run queued"
+      : result.status === "checks_passed"
+        ? "Quality checks passed"
+        : result.status === "checks_failed"
+          ? "Quality checks failed"
+          : runStatus === "blocked" || runStatus === "failed"
+            ? "Automation run needs attention"
+            : "Automation run result",
+    subtitle: runStatus,
+    body: result.summary ?? result.message ?? (
+      runStatus === "queued" || runStatus === "running"
+        ? "Cerbanimo accepted the action and the worker will finalize the run asynchronously."
+        : "Cerbanimo returned an automation run report."
+    ),
     metadata: {
       runId: String(run.run_uuid ?? run.id),
       taskId: result.taskId ? String(result.taskId) : "",
@@ -351,7 +367,13 @@ export function automationRunResultCard(run: AutomationRun): ResponseCard {
       title: String(check.key ?? "Check"),
       subtitle: String(check.message ?? ""),
       status: String(check.status ?? "unknown")
-    }))
+    })),
+    actions: actionId
+      ? [
+          ...(retryable ? [{ id: "retry-automation", label: "Retry", style: "primary" as const, command: `retry action ${actionId}` }] : []),
+          ...(cancellable ? [{ id: "cancel-automation", label: "Cancel", style: "secondary" as const, command: `cancel action ${actionId}` }] : [])
+        ]
+      : undefined
   };
 }
 

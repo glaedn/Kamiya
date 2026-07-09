@@ -51,5 +51,4 @@ Canonical result statuses are `checks_passed`, `checks_failed`, `blocked`, `canc
 
 `checks_failed` is a completed automation report, not a worker crash. The task is not submitted as successful work.
 
-Kamiya renders the durable run report after confirmation and treats non-terminal runs after the 30-second poll window as retryable instead of displaying queued state as a final report.
-
+Kamiya confirms the durable action, hydrates the automation run once, and renders Cerbanimo's current run state truthfully. Queued and running states stay visible as queued/running cards; retry controls appear only when Cerbanimo reports blocked, failed, or retry-wait state.

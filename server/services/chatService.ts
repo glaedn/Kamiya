@@ -554,7 +554,7 @@ async function executePendingAction(request: ChatTurnRequest): Promise<ChatTurnR
 
   return respond(
     action.kind === "run_automation" && automationRun
-      ? "Confirmed. Cerbanimo ran the automation and returned the report below."
+      ? automationConfirmationMessage(automationRun)
       : result.mocked
       ? "Confirmed. I simulated the Cerbanimo call because live API credentials are not configured yet."
       : "Confirmed. I sent the action to Cerbanimo and logged the result.",
@@ -643,6 +643,18 @@ function automationHistoryStatus(value: unknown): "queued" | "running" | "comple
   if (status === "completed") return "completed";
   if (status === "running") return "running";
   return "queued";
+}
+
+function automationConfirmationMessage(value: unknown): string {
+  if (!isAutomationRunRecord(value)) return "Confirmed. Cerbanimo accepted the automation action, but the run state was not available yet.";
+  const status = String(value.status);
+  const resultStatus = value.result && typeof value.result === "object" && !Array.isArray(value.result)
+    ? String((value.result as Record<string, unknown>).status ?? "")
+    : "";
+  if (status === "completed" && resultStatus) return "Confirmed. Cerbanimo finalized the automation run and returned the report below.";
+  if (status === "blocked" || status === "failed") return "Confirmed, but Cerbanimo says this automation needs attention before it can finish.";
+  if (status === "cancelled") return "Cerbanimo shows this automation run as cancelled.";
+  return "Confirmed. Cerbanimo queued the automation run. The run card below is the source of truth while the worker processes it.";
 }
 
 function respond(
