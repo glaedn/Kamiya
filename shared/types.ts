@@ -354,7 +354,7 @@ export interface TaskEvidenceRequirement {
   proofTypes?: string[];
   checks?: string[];
   minimumEvidenceItems?: number;
-  semanticReview?: boolean;
+  semanticReview?: "never" | "optional" | "required" | "configuration_error";
 }
 
 export interface TaskEvidenceItem {
@@ -374,6 +374,12 @@ export interface TaskEvidenceItem {
   created_at?: string | null;
 }
 
+export interface TaskEvidenceRequirementCoverage {
+  requirementId: string;
+  status: string;
+  evidenceItemCount: number;
+}
+
 export interface TaskEvidenceBundle {
   id: number | string;
   bundle_uuid?: string | null;
@@ -388,6 +394,10 @@ export interface TaskEvidenceBundle {
   action_id?: number | string | null;
   actionId?: string | null;
   items?: TaskEvidenceItem[];
+  itemCount?: number;
+  validationStatus?: string;
+  requirementCoverage?: TaskEvidenceRequirementCoverage[];
+  supersedes_bundle_id?: number | string | null;
   created_at?: string | null;
   updated_at?: string | null;
 }
@@ -400,6 +410,14 @@ export interface TaskEvidenceContext {
   action?: CerbanimoAction | null;
   validations?: Array<Record<string, unknown>>;
   createdItemId?: number | string;
+  allowedActions?: {
+    update?: boolean;
+    addItem?: boolean;
+    fetchUrl?: boolean;
+    preview?: boolean;
+    cancel?: boolean;
+    confirm?: boolean;
+  };
 }
 
 export interface AutomationRunResult {

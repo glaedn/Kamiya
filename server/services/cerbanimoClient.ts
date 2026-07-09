@@ -192,6 +192,12 @@ const taskAutomationContextSchema = z.object({
   template: z.record(z.unknown()).optional()
 }).passthrough();
 
+const semanticReviewSchema = z.preprocess((value) => {
+  if (value === true) return "required";
+  if (value === false || value === undefined || value === null || value === "") return "never";
+  return value;
+}, z.enum(["never", "optional", "required", "configuration_error"]).catch("configuration_error"));
+
 const taskEvidenceRequirementSchema = z.object({
   requirementId: z.string(),
   description: z.string().optional(),
@@ -199,7 +205,7 @@ const taskEvidenceRequirementSchema = z.object({
   proofTypes: z.array(z.string()).optional().catch([]),
   checks: z.array(z.string()).optional().catch([]),
   minimumEvidenceItems: z.number().optional(),
-  semanticReview: z.boolean().optional()
+  semanticReview: semanticReviewSchema.optional().default("never")
 }).passthrough();
 
 const taskEvidenceItemSchema = z.object({
@@ -233,6 +239,14 @@ const taskEvidenceBundleSchema = z.object({
   action_id: z.union([z.number(), z.string()]).optional().nullable(),
   actionId: z.string().optional().nullable(),
   items: z.array(taskEvidenceItemSchema).optional().default([]),
+  itemCount: z.number().optional(),
+  validationStatus: z.string().optional(),
+  requirementCoverage: z.array(z.object({
+    requirementId: z.string(),
+    status: z.string(),
+    evidenceItemCount: z.number()
+  }).passthrough()).optional().default([]),
+  supersedes_bundle_id: z.union([z.number(), z.string()]).optional().nullable(),
   created_at: z.string().optional().nullable(),
   updated_at: z.string().optional().nullable()
 }).passthrough();
@@ -244,7 +258,15 @@ const taskEvidenceContextSchema = z.object({
   bundles: z.array(taskEvidenceBundleSchema).optional(),
   action: cerbanimoActionSchema.optional().nullable(),
   validations: z.array(z.record(z.unknown())).optional().default([]),
-  createdItemId: z.union([z.number(), z.string()]).optional()
+  createdItemId: z.union([z.number(), z.string()]).optional(),
+  allowedActions: z.object({
+    update: z.boolean().optional(),
+    addItem: z.boolean().optional(),
+    fetchUrl: z.boolean().optional(),
+    preview: z.boolean().optional(),
+    cancel: z.boolean().optional(),
+    confirm: z.boolean().optional()
+  }).partial().optional()
 }).passthrough();
 
 const automationRunSchema = z.object({
@@ -493,6 +515,28 @@ export class CerbanimoClient {
       `/tasks/${encodeURIComponent(String(taskId))}/evidence/bundles/${encodeURIComponent(String(bundleId))}/preview`,
       "POST",
       { sourceClient: "kamiya-web" },
+      taskEvidenceContextSchema
+    ) as Promise<CerbanimoResult<TaskEvidenceContext>>;
+  }
+
+  async cancelEvidenceBundle(taskId: string | number, bundleId: string | number, reason = "Cancelled from Kamiya."): Promise<CerbanimoResult<TaskEvidenceContext>> {
+    return this.requestV1(
+      `/tasks/${encodeURIComponent(String(taskId))}/evidence/bundles/${encodeURIComponent(String(bundleId))}/cancel`,
+      "POST",
+      { reason },
+      taskEvidenceContextSchema
+    ) as Promise<CerbanimoResult<TaskEvidenceContext>>;
+  }
+
+  async supersedeEvidenceBundle(
+    taskId: string | number,
+    bundleId: string | number,
+    input: { reflection?: string; summary?: string } = {}
+  ): Promise<CerbanimoResult<TaskEvidenceContext>> {
+    return this.requestV1(
+      `/tasks/${encodeURIComponent(String(taskId))}/evidence/bundles/${encodeURIComponent(String(bundleId))}/supersede`,
+      "POST",
+      input,
       taskEvidenceContextSchema
     ) as Promise<CerbanimoResult<TaskEvidenceContext>>;
   }

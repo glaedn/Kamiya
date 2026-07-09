@@ -250,10 +250,14 @@ export function evidenceBundleCard(context: TaskEvidenceContext, title = "Task e
   const bundle = context.bundle ?? context.bundles?.[0];
   const requirements = context.requirements ?? bundle?.requirement_snapshot ?? [];
   const items = bundle?.items ?? [];
+  const itemCount = bundle?.itemCount ?? items.length;
+  const coverage = bundle?.requirementCoverage ?? [];
   const taskId = String(bundle?.task_id ?? context.task?.id ?? "");
   const bundleId = String(bundle?.bundle_uuid ?? bundle?.id ?? "");
   const actionId = context.action?.action_uuid ?? (context.action?.id ? String(context.action.id) : undefined);
   const status = String(bundle?.status ?? "not started");
+  const allowed = context.allowedActions ?? {};
+  const canConfirm = Boolean(actionId && allowed.confirm !== false && context.action?.status !== "cancelled" && !["cancelled", "superseded", "validation_passed", "validation_failed"].includes(status));
 
   return {
     id: `evidence-${taskId || crypto.randomUUID()}-${bundleId || "context"}`,
@@ -261,12 +265,12 @@ export function evidenceBundleCard(context: TaskEvidenceContext, title = "Task e
     title,
     subtitle: status,
     body: bundle
-      ? `Cerbanimo has ${items.length} evidence item${items.length === 1 ? "" : "s"} saved for this task.`
+      ? `Cerbanimo has ${itemCount} evidence item${itemCount === 1 ? "" : "s"} saved for this task.`
       : "Cerbanimo returned the validation requirements for this task.",
     metadata: {
       taskId,
       bundleId,
-      itemCount: items.length,
+      itemCount,
       requirementCount: requirements.length,
       actionId: actionId ?? "",
       reflection: bundle?.reflection ? "present" : "missing"
@@ -275,23 +279,35 @@ export function evidenceBundleCard(context: TaskEvidenceContext, title = "Task e
       ...requirements.map((requirement) => ({
         id: requirement.requirementId,
         title: requirement.description || requirement.requirementId,
-        subtitle: (requirement.acceptedEvidenceTypes ?? requirement.proofTypes ?? []).join(", ") || "Any accepted proof",
+        subtitle: [
+          (requirement.acceptedEvidenceTypes ?? requirement.proofTypes ?? []).join(", ") || "Any accepted proof",
+          requirement.semanticReview && requirement.semanticReview !== "never" ? `semantic ${requirement.semanticReview}` : ""
+        ].filter(Boolean).join(" | "),
         status: (requirement.checks ?? []).join(", ") || "evidence_present"
+      })),
+      ...coverage.map((item) => ({
+        id: `coverage-${item.requirementId}`,
+        title: `Coverage: ${item.requirementId}`,
+        subtitle: `${item.evidenceItemCount} item${item.evidenceItemCount === 1 ? "" : "s"} mapped`,
+        status: item.status
       })),
       ...items.map((item) => ({
         id: String(item.evidence_uuid ?? item.id),
         title: item.title || item.evidence_type,
-        subtitle: item.source_url ?? item.artifact_uri ?? item.text_content ?? "",
+        subtitle: item.source_url ? "URL snapshot" : item.artifact_uri ? "Cerbanimo artifact reference" : item.text_content ?? "",
         status: item.evidence_type,
         metadata: {
-          hash: String(item.content_sha256 ?? "").slice(0, 12),
-          requirements: (item.requirement_ids ?? []).join(", ") || "all"
+          requirements: (item.requirement_ids ?? []).join(", ") || "general context",
+          mediaType: item.media_type ?? "",
+          byteSize: String(item.byte_size ?? "")
         }
       }))
     ],
     actions: [
-      ...(bundle && status === "draft" ? [{ id: "preview-evidence", label: "Preview submission", style: "primary" as const, command: `preview evidence ${taskId}` }] : []),
-      ...(actionId ? [{ id: "confirm-evidence", label: "Confirm submission", style: "primary" as const, actionId }] : [])
+      ...(bundle && status === "draft" && allowed.preview !== false ? [{ id: "preview-evidence", label: "Preview submission", style: "primary" as const, command: `preview evidence ${taskId}` }] : []),
+      ...(canConfirm ? [{ id: "confirm-evidence", label: "Confirm submission", style: "primary" as const, actionId }] : []),
+      ...(bundle && ["needs_more_evidence", "manual_review_required"].includes(status) ? [{ id: "add-more-evidence", label: "Add more evidence", style: "secondary" as const, command: `add more evidence ${taskId} ${bundleId}` }] : []),
+      ...(bundle && allowed.cancel ? [{ id: "cancel-evidence", label: "Cancel", style: "secondary" as const, command: `cancel evidence ${taskId} ${bundleId}` }] : [])
     ]
   };
 }

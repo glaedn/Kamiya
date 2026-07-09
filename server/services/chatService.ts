@@ -591,13 +591,17 @@ async function executePendingAction(request: ChatTurnRequest): Promise<ChatTurnR
 type TaskEvidenceCommand =
   | { kind: "requirements" | "start" | "preview"; taskId: string }
   | { kind: "add_text"; taskId: string; text: string }
-  | { kind: "fetch_url"; taskId: string; url: string };
+  | { kind: "fetch_url"; taskId: string; url: string }
+  | { kind: "supersede"; taskId: string; bundleId: string }
+  | { kind: "cancel"; taskId: string; bundleId: string };
 
 async function handleTaskEvidenceCommand(request: ChatTurnRequest, command: TaskEvidenceCommand): Promise<ChatTurnResponse> {
   if (command.kind === "requirements") return showEvidenceRequirements(request, command.taskId);
   if (command.kind === "start") return startEvidenceSubmission(request, command.taskId);
   if (command.kind === "add_text") return addTextEvidence(request, command.taskId, command.text);
   if (command.kind === "fetch_url") return addUrlEvidence(request, command.taskId, command.url);
+  if (command.kind === "supersede") return supersedeEvidenceBundle(request, command.taskId, command.bundleId);
+  if (command.kind === "cancel") return cancelEvidenceBundle(request, command.taskId, command.bundleId);
   return previewEvidenceSubmission(request, command.taskId);
 }
 
@@ -656,7 +660,7 @@ async function addTextEvidence(request: ChatTurnRequest, taskId: string, text: s
     textContent: text
   });
   if (!added.ok || !added.data) {
-    return respond(`Cerbanimo could not save that evidence: ${added.error}`, request.session, undefined, [evidenceBundleCard(created.data, "Task evidence draft")]);
+    return respond(`Cerbanimo could not save that evidence: ${evidenceErrorCopy(added)}`, request.session, undefined, [evidenceBundleCard(created.data, "Task evidence draft")]);
   }
   return respond(
     "I saved that evidence in Cerbanimo. Preview the submission when the bundle looks complete.",
@@ -674,13 +678,39 @@ async function addUrlEvidence(request: ChatTurnRequest, taskId: string, url: str
   }
   const added = await cerbanimo.fetchEvidenceUrl(taskId, created.data.bundle.bundle_uuid ?? created.data.bundle.id, { url });
   if (!added.ok || !added.data) {
-    return respond(`Cerbanimo could not snapshot that URL as evidence: ${added.error}`, request.session, undefined, [evidenceBundleCard(created.data, "Task evidence draft")]);
+    return respond(`Cerbanimo could not snapshot that URL as evidence: ${evidenceErrorCopy(added)} The URL fetch was reserved separately, so no partial evidence was attached to the bundle.`, request.session, undefined, [evidenceBundleCard(created.data, "Task evidence draft")]);
   }
   return respond(
     "I saved a bounded snapshot of that URL as Cerbanimo evidence.",
     request.session,
     undefined,
     [evidenceBundleCard(added.data, "Task evidence draft")]
+  );
+}
+
+async function supersedeEvidenceBundle(request: ChatTurnRequest, taskId: string, bundleId: string): Promise<ChatTurnResponse> {
+  const result = await new CerbanimoClient(request.auth).supersedeEvidenceBundle(taskId, bundleId);
+  if (!result.ok || !result.data) {
+    return respond(`Cerbanimo could not start a superseding evidence draft: ${evidenceErrorCopy(result)}`, request.session);
+  }
+  return respond(
+    "I started a new evidence draft linked to the earlier validation result. The older bundle stays frozen for audit; add only the missing evidence here, then preview again.",
+    request.session,
+    undefined,
+    [evidenceBundleCard(result.data, "Superseding evidence draft")]
+  );
+}
+
+async function cancelEvidenceBundle(request: ChatTurnRequest, taskId: string, bundleId: string): Promise<ChatTurnResponse> {
+  const result = await new CerbanimoClient(request.auth).cancelEvidenceBundle(taskId, bundleId);
+  if (!result.ok || !result.data) {
+    return respond(`Cerbanimo could not cancel that evidence bundle: ${evidenceErrorCopy(result)}`, request.session);
+  }
+  return respond(
+    "Cerbanimo cancelled the evidence bundle and fenced any linked validation action or run.",
+    request.session,
+    undefined,
+    [evidenceBundleCard(result.data, "Cancelled evidence bundle")]
   );
 }
 
@@ -723,6 +753,13 @@ function parseTaskAutomationCommand(message: string): { kind: "prepare" | "quali
 
 function parseTaskEvidenceCommand(message: string): TaskEvidenceCommand | undefined {
   const trimmed = message.trim();
+  const supersede = trimmed.match(/^add\s+more\s+evidence\s+(\S+)\s+(\S+)$/i)
+    ?? trimmed.match(/^supersede\s+evidence\s+(\S+)\s+(\S+)$/i);
+  if (supersede?.[1] && supersede[2]) return { kind: "supersede", taskId: supersede[1], bundleId: supersede[2] };
+
+  const cancel = trimmed.match(/^cancel\s+evidence\s+(\S+)\s+(\S+)$/i);
+  if (cancel?.[1] && cancel[2]) return { kind: "cancel", taskId: cancel[1], bundleId: cancel[2] };
+
   const requirements = trimmed.match(/^(?:view\s+)?(?:evidence\s+requirements|requirements\s+for\s+evidence)\s+(\S+)$/i);
   if (requirements?.[1]) return { kind: "requirements", taskId: requirements[1] };
 
@@ -849,9 +886,23 @@ function evidenceConfirmationMessage(value: unknown): string {
     : "";
   if (resultStatus === "validation_passed") return "Confirmed. Cerbanimo validated the evidence and moved the task into review.";
   if (resultStatus === "needs_more_evidence") return "Confirmed. Cerbanimo validated the bundle and needs more evidence before review.";
-  if (resultStatus === "manual_review_required") return "Confirmed. Cerbanimo queued the evidence for manual validation review.";
+  if (resultStatus === "manual_review_required") return "Confirmed. Cerbanimo could not safely decide this automatically, so it routed the evidence to manual validation review.";
   if (resultStatus === "validation_failed") return "Confirmed, but Cerbanimo rejected the evidence during validation.";
   return "Confirmed. Cerbanimo queued the evidence validation run. The validation card below is the source of truth while the worker processes it.";
+}
+
+function evidenceErrorCopy(result: { error?: string; code?: string | number }): string {
+  const code = String(result.code ?? "");
+  if (/MEDIA_TYPE|BASE64|POLYGLOT|TOO_LARGE|EMPTY_FILE/i.test(code)) {
+    return `${result.error ?? "The upload was rejected by Cerbanimo's evidence safety checks."} Try a JPEG, PNG, WebP, PDF, or plain text file. SVGs, executables, archives, macros, and unknown binaries are not accepted.`;
+  }
+  if (/PRIVATE_NETWORK|FETCH_TIMEOUT|NON_2XX|URL_NOT_ALLOWED|BAD_REDIRECT/i.test(code)) {
+    return `${result.error ?? "The URL snapshot was rejected by Cerbanimo's fetch safety checks."} Use a public HTTPS URL that does not redirect to private or reserved infrastructure.`;
+  }
+  if (/OWNER|AUTH|DENIED|FORBIDDEN/i.test(code)) {
+    return `${result.error ?? "Cerbanimo denied this evidence operation."} Evidence drafts can only be changed by their owning contributor or an audited service operation.`;
+  }
+  return result.error ?? "Cerbanimo returned an evidence error.";
 }
 
 function respond(

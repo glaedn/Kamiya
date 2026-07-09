@@ -185,7 +185,16 @@ describe("CerbanimoClient /api/v1 action contract", () => {
   it("loads task evidence through the v1 evidence endpoint", async () => {
     const fetchMock = mockFetch({
       ok: true,
-      data: taskEvidenceContext(),
+      data: {
+        ...taskEvidenceContext(),
+        requirements: [{
+          requirementId: "proof",
+          description: "Show the work was completed.",
+          acceptedEvidenceTypes: ["text"],
+          checks: ["evidence_present"],
+          semanticReview: "never"
+        }]
+      },
       error: null,
       requestId: "req-evidence"
     });
@@ -194,7 +203,25 @@ describe("CerbanimoClient /api/v1 action contract", () => {
 
     expect(result.ok).toBe(true);
     expect(result.data?.requirements?.[0].requirementId).toBe("proof");
+    expect(result.data?.requirements?.[0].semanticReview).toBe("never");
     expect(fetchMock.mock.calls[0][0]).toBe("http://localhost:4000/api/v1/tasks/203/evidence");
+  });
+
+  it("supports evidence cancellation and superseding draft routes", async () => {
+    const fetchMock = vi
+      .fn()
+      .mockResolvedValueOnce(jsonResponse({ ok: true, data: taskEvidenceContext(), error: null, requestId: "req-cancel" }))
+      .mockResolvedValueOnce(jsonResponse({ ok: true, data: taskEvidenceContext(), error: null, requestId: "req-supersede" }, 201));
+    vi.stubGlobal("fetch", fetchMock);
+
+    const client = new CerbanimoClient(auth);
+    const cancel = await client.cancelEvidenceBundle(203, "bundle-501");
+    const supersede = await client.supersedeEvidenceBundle(203, "bundle-501");
+
+    expect(cancel.ok).toBe(true);
+    expect(supersede.ok).toBe(true);
+    expect(fetchMock.mock.calls[0][0]).toBe("http://localhost:4000/api/v1/tasks/203/evidence/bundles/bundle-501/cancel");
+    expect(fetchMock.mock.calls[1][0]).toBe("http://localhost:4000/api/v1/tasks/203/evidence/bundles/bundle-501/supersede");
   });
 
   it("confirms evidence submissions through actions instead of legacy submit routes", async () => {

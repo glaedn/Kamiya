@@ -144,7 +144,7 @@ export async function expectQualityCheckAutomation(projectId?: number): Promise<
     expect(row.action_status).toBe("executed");
     expect(row.task_status).toBe("submitted");
     expect(row.submitted).toBe(true);
-    expect((row.proof_of_work_links ?? []).join(" ")).toContain("quality-check-report");
+    expect((row.proof_of_work_links ?? []).join(" ")).toContain("cerbanimo://evidence-bundles/");
     expect(String(row.reflection ?? "")).toContain("Automated quality-check report");
     return {
       runId: row.run_id,

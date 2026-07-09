@@ -338,6 +338,32 @@ describe("handleChatTurn", () => {
       "http://localhost:4000/api/v1/automation/runs/1001"
     ]);
   });
+
+  it("starts a superseding evidence draft for needs-more-evidence flows", async () => {
+    const fetchMock = vi.fn().mockResolvedValueOnce(jsonResponse({
+      ok: true,
+      data: taskEvidenceContext({
+        bundle: evidenceBundle({ id: 502, bundle_uuid: "bundle-502", status: "draft", supersedes_bundle_id: 501 }),
+        bundles: [evidenceBundle({ id: 502, bundle_uuid: "bundle-502", status: "draft", supersedes_bundle_id: 501 })],
+        allowedActions: { addItem: true, fetchUrl: true, preview: true, cancel: true }
+      }),
+      error: null,
+      requestId: "req-supersede"
+    }, 201));
+    vi.stubGlobal("fetch", fetchMock);
+
+    const response = await handleChatTurn({
+      message: "add more evidence 203 bundle-501",
+      history: [],
+      session: {},
+      auth: cerbanimoAuth(),
+      channel: "sdk"
+    });
+
+    expect(response.message.content).toContain("new evidence draft");
+    expect(JSON.stringify(response.message.cards)).toContain("Superseding evidence draft");
+    expect(fetchMock.mock.calls[0][0]).toBe("http://localhost:4000/api/v1/tasks/203/evidence/bundles/bundle-501/supersede");
+  });
 });
 
 function cerbanimoAuth() {
