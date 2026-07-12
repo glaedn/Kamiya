@@ -100,6 +100,7 @@ export async function expectSuccessfulBootstrap(runId: string): Promise<Database
   expect(report.eventTypes).toContain("workflow.completed");
   expect(report.eventTypes).toContain("action.executed");
   await expectGraphAcyclic(report.projectId);
+  await expectGraphHasDependency(report.projectId);
   await expectTaskAutomationClassifications(report.projectId);
   await expectNoSecretsForRun(runId);
   return report;
@@ -229,6 +230,14 @@ async function expectGraphAcyclic(projectId?: number): Promise<void> {
   });
 }
 
+async function expectGraphHasDependency(projectId?: number): Promise<void> {
+  expect(projectId).toBeTruthy();
+  await withClient(async (client) => {
+    const result = await client.query(`SELECT id, dependencies FROM tasks WHERE project_id = $1 ORDER BY id ASC`, [projectId]);
+    expect(result.rows.some((row) => (row.dependencies ?? []).length > 0), "at least one generated task dependency").toBe(true);
+  });
+}
+
 async function expectTaskAutomationClassifications(projectId?: number): Promise<void> {
   expect(projectId).toBeTruthy();
   await withClient(async (client) => {
@@ -255,7 +264,7 @@ async function expectTaskAutomationClassifications(projectId?: number): Promise<
       counts[classification as keyof typeof counts] += 1;
     }
     expect(counts).toEqual({
-      human_driven: 1,
+      human_driven: 2,
       assisted_automation: 1,
       fully_automatable: 1
     });

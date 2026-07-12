@@ -41,7 +41,7 @@ test.describe("golden conversation failure states", () => {
     await expect(page.getByText(/Quest creation progress|Your quest is live/).first()).toBeVisible({ timeout: 20_000 });
     await expect(page.getByText("Your quest is live")).toBeVisible({ timeout: 45_000 });
     const report = await expectRetryThenSuccess(runId);
-    expect(report.taskCount).toBe(3);
+    expect(report.taskCount).toBe(4);
     expect(errors).toEqual([]);
   });
 

@@ -287,7 +287,7 @@ function detailFor(action: FixtureAction) {
     action.execution_result = {
       status: "executed",
       projectId: 100,
-      taskCount: 3,
+      taskCount: 4,
       activeTaskCount: 3,
       activeTasks: activeTasks()
     };
@@ -370,6 +370,18 @@ function allTasks() {
       reward_tokens: 50,
       dependencies: [],
       automation: fullyAutomatableAutomation()
+    },
+    {
+      id: 204,
+      project_id: 100,
+      name: "Launch pilot readiness review",
+      description: "Confirm governance, prototype, and quality-check evidence before the pilot opens.",
+      status: "blocked",
+      skill_name: "Project coordination",
+      skill_level: 2,
+      reward_tokens: 30,
+      dependencies: [201, 202, 203],
+      automation: humanAutomation()
     }
   ];
 }
