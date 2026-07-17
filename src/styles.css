@@ -319,6 +319,7 @@ h1 {
 .response-card.quest_opening_scene,
 .response-card.quest_ledger,
 .response-card.automation,
+.response-card.settlement_progress,
 .response-card.mode {
   border-color: rgba(100, 234, 255, 0.34);
   box-shadow: var(--shadow), var(--glow-cyan);
@@ -333,6 +334,83 @@ h1 {
 .response-card.narrative_settings {
   border-color: rgba(255, 77, 227, 0.34);
   box-shadow: var(--shadow), var(--glow-magenta);
+}
+
+textarea {
+  width: 100%;
+  resize: vertical;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  padding: 10px 11px;
+  color: var(--ink);
+  background: rgba(255, 255, 255, 0.07);
+  font: inherit;
+}
+
+.guided-desk {
+  display: grid;
+  gap: 12px;
+  margin-top: 14px;
+  padding: 14px;
+  border: 1px solid rgba(100, 234, 255, 0.24);
+  border-radius: 8px;
+  background: rgba(8, 10, 28, 0.38);
+}
+
+.guided-desk-heading,
+.guided-decision-actions {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  flex-wrap: wrap;
+}
+
+.guided-desk-heading span,
+.guided-note {
+  color: var(--muted-strong);
+  font-size: 12px;
+}
+
+.segmented-control {
+  display: flex;
+  gap: 14px;
+  border: 0;
+  padding: 0;
+}
+
+.segmented-control legend {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  overflow: hidden;
+  clip: rect(0 0 0 0);
+}
+
+.segmented-control label {
+  display: flex;
+  grid-template-columns: auto 1fr;
+  align-items: center;
+  gap: 6px;
+  color: var(--muted-strong);
+  font-size: 13px;
+}
+
+.segmented-control input {
+  min-height: auto;
+  width: auto;
+}
+
+.response-card.settlement_complete {
+  border-color: rgba(100, 234, 255, 0.5);
+  box-shadow: var(--shadow), var(--glow-cyan), var(--glow-magenta);
+}
+
+.response-card.settlement_failure {
+  border-color: rgba(255, 209, 102, 0.5);
+  background:
+    linear-gradient(180deg, var(--gold-soft), rgba(255, 255, 255, 0.035)),
+    rgba(21, 18, 38, 0.82);
 }
 
 .response-card.stats,

@@ -4,7 +4,8 @@ import type {
   ChatTurnRequest,
   ChatTurnResponse,
   ProjectBootstrapActionDetail,
-  TaskAutomationContext
+  TaskAutomationContext,
+  TaskSettlementContext
 } from "../../shared/types";
 import { matchSlashCommand } from "../../shared/commands";
 import {
@@ -30,6 +31,7 @@ import {
   reviewAssignmentCard,
   reviewAssignmentsCard,
   reviewStatusCard,
+  settlementCard,
   workflowFailureCard,
   workflowProgressCard
 } from "./cardFactory";
@@ -77,6 +79,11 @@ async function buildChatTurnResponse(request: ChatTurnRequest): Promise<ChatTurn
     return cancelDurableAction(request, actionCommand.actionId);
   }
 
+  const settlementCommand = parseSettlementCommand(message, request.session);
+  if (settlementCommand) {
+    return handleSettlementCommand(request, settlementCommand);
+  }
+
   if (/^explore active tasks\b/i.test(message) && request.session.activeAction?.actionId) {
     const detail = await new CerbanimoClient(request.auth).getActionDetail(request.session.activeAction.actionUuid ?? request.session.activeAction.actionId);
     if (!detail.ok || !detail.data) return respond(`I could not refresh active tasks from Cerbanimo: ${detail.error}`, request.session);
@@ -89,6 +96,10 @@ async function buildChatTurnResponse(request: ChatTurnRequest): Promise<ChatTurn
   const gameMasterModeCommand = parseGameMasterModeCommand(message);
   if (gameMasterModeCommand) {
     if (gameMasterModeCommand.kind === "plain_override") {
+      const plainSettlementCommand = parseSettlementCommand(gameMasterModeCommand.strippedMessage, request.session, true);
+      if (plainSettlementCommand) {
+        return handleSettlementCommand(request, plainSettlementCommand, true);
+      }
       const questCommand = parseQuestCommand(gameMasterModeCommand.strippedMessage);
       if (questCommand?.kind === "show_quest") {
         return showQuestContext(request, questCommand.projectId, true);
@@ -770,6 +781,24 @@ async function executePendingAction(request: ChatTurnRequest): Promise<ChatTurnR
     );
   }
 
+  if (action.kind === "settle_task") {
+    const settlement = (result.data as { settlement?: TaskSettlementContext } | undefined)?.settlement;
+    if (!settlement) {
+      return respond("Confirmed. Cerbanimo accepted the settlement action, but Kamiya could not hydrate its authoritative state yet. Use `settlement status <taskId>` to refresh.", {
+        ...request.session,
+        pendingAction: undefined,
+        currentSettlementTaskId: action.payload.taskId as string | number | undefined
+      });
+    }
+    const hydrated = await hydrateSettlementBriefly(new CerbanimoClient(request.auth), settlement);
+    return respond(
+      settlementResponseCopy(hydrated),
+      settlementSession({ ...request.session, pendingAction: undefined }, hydrated),
+      undefined,
+      [settlementCard(hydrated)]
+    );
+  }
+
   const taskWaitTimedOut = Boolean((result.data as { taskWaitTimedOut?: unknown } | undefined)?.taskWaitTimedOut);
   const automationRun = (result.data as { automationRun?: unknown } | undefined)?.automationRun;
   const record = {
@@ -830,6 +859,11 @@ type ReviewCommand =
   | { kind: "validation_decision"; reviewId: string; decision: string; reason?: string }
   | { kind: "peer_decision" | "pm_decision"; roundId: string; assignmentId?: string; decision: string; reason?: string };
 
+type SettlementCommand =
+  | { kind: "task_status" | "preview"; taskId: string }
+  | { kind: "show" | "retry" | "cancel"; settlementId: string }
+  | { kind: "missing_current" };
+
 async function handleTaskEvidenceCommand(request: ChatTurnRequest, command: TaskEvidenceCommand): Promise<ChatTurnResponse> {
   if (command.kind === "requirements") return showEvidenceRequirements(request, command.taskId);
   if (command.kind === "start") return startEvidenceSubmission(request, command.taskId);
@@ -850,7 +884,14 @@ async function handleReviewCommand(request: ChatTurnRequest, command: ReviewComm
   if (command.kind === "status") {
     const result = await cerbanimo.taskReviewStatus(command.taskId);
     if (!result.ok || !result.data) return respond(`I could not load that task review status from Cerbanimo: ${result.error}`, request.session);
-    return respond(result.data.copy ?? "Cerbanimo returned the task review status.", request.session, undefined, [reviewStatusCard(result.data)]);
+    const settlement = result.data.settlement ? await hydrateSettlementBriefly(cerbanimo, result.data.settlement) : null;
+    const context = { ...result.data, settlement };
+    return respond(
+      settlement ? settlementResponseCopy(settlement) : result.data.copy ?? "Cerbanimo returned the task review status.",
+      settlement ? settlementSession(request.session, settlement) : request.session,
+      undefined,
+      [reviewStatusCard(context), ...(settlement ? [settlementCard(settlement)] : [])]
+    );
   }
   if (command.kind === "open") {
     const result = await cerbanimo.getReviewAssignment(command.assignmentId);
@@ -885,9 +926,41 @@ async function handleReviewCommand(request: ChatTurnRequest, command: ReviewComm
   if (command.kind === "pm_decision") {
     const result = await cerbanimo.decidePmReview(command.roundId, { assignmentId: command.assignmentId, decision: command.decision, reason: command.reason });
     if (!result.ok || !result.data) return respond(`Cerbanimo could not record that PM decision: ${result.error}`, request.session);
-    return respond(pmDecisionCopy(command.decision), request.session, undefined, [reviewStatusCard(result.data)]);
+    const settlement = result.data.settlement ? await hydrateSettlementBriefly(cerbanimo, result.data.settlement) : null;
+    const context = { ...result.data, settlement };
+    return respond(
+      settlement ? settlementResponseCopy(settlement) : pmDecisionCopy(command.decision),
+      settlement ? settlementSession(request.session, settlement) : request.session,
+      undefined,
+      [reviewStatusCard(context), ...(settlement ? [settlementCard(settlement)] : [])]
+    );
   }
   return respond("I could not recognize that review command.", request.session);
+}
+
+async function handleSettlementCommand(request: ChatTurnRequest, command: SettlementCommand, plain = false): Promise<ChatTurnResponse> {
+  if (command.kind === "missing_current") {
+    return respond("I do not have a current settlement in this chat yet. Use `settlement status <taskId>` or `show settlement <settlementId>`.", request.session);
+  }
+  const cerbanimo = new CerbanimoClient(request.auth);
+  let result;
+  if (command.kind === "task_status") result = await cerbanimo.taskSettlement(command.taskId);
+  else if (command.kind === "preview") result = await cerbanimo.previewTaskSettlement(command.taskId);
+  else if (command.kind === "retry") result = await cerbanimo.retrySettlement(command.settlementId);
+  else if (command.kind === "cancel") result = await cerbanimo.cancelSettlement(command.settlementId);
+  else if ("settlementId" in command) result = await cerbanimo.getSettlement(command.settlementId);
+  else return respond("I could not resolve a settlement identifier for that command.", request.session);
+  if (!result.ok || !result.data) {
+    return respond(`Cerbanimo could not ${settlementVerb(command.kind)}: ${result.error}`, request.session);
+  }
+  const settlement = await hydrateSettlementBriefly(cerbanimo, result.data);
+  const nextSession = settlementSession(request.session, settlement);
+  return respond(
+    settlementResponseCopy(settlement, plain),
+    nextSession,
+    undefined,
+    [settlementCard(settlement, { plain })]
+  );
 }
 
 async function showEvidenceRequirements(
@@ -1120,6 +1193,102 @@ function parseReviewCommand(message: string): ReviewCommand | undefined {
   return undefined;
 }
 
+function parseSettlementCommand(
+  message: string,
+  session: ChatTurnRequest["session"],
+  allowImplicitCurrent = false
+): SettlementCommand | undefined {
+  const trimmed = message.trim();
+  const taskStatus = trimmed.match(/^(?:settlement status|task settlement status|show task settlement)\s+(\S+)$/i);
+  if (taskStatus?.[1]) return { kind: "task_status", taskId: taskStatus[1] };
+
+  const preview = trimmed.match(/^preview settlement\s+(\S+)$/i);
+  if (preview?.[1]) return { kind: "preview", taskId: preview[1] };
+
+  const retry = trimmed.match(/^retry settlement\s+(\S+)$/i);
+  if (retry?.[1]) return { kind: "retry", settlementId: retry[1] };
+
+  const cancel = trimmed.match(/^cancel settlement\s+(\S+)$/i);
+  if (cancel?.[1]) return { kind: "cancel", settlementId: cancel[1] };
+
+  const currentDetails = /^\/?settlement$|^show settlement details$/i.test(trimmed)
+    || (allowImplicitCurrent && /^settlement details$/i.test(trimmed));
+  if (currentDetails) {
+    if (session.currentSettlementId) return { kind: "show", settlementId: String(session.currentSettlementId) };
+    if (session.currentSettlementTaskId) return { kind: "task_status", taskId: String(session.currentSettlementTaskId) };
+    return { kind: "missing_current" };
+  }
+
+  const show = trimmed.match(/^(?:show|open) settlement\s+(\S+)$/i)
+    ?? trimmed.match(/^explore settlement tasks\s+(\S+)$/i);
+  if (show?.[1]) return { kind: "show", settlementId: show[1] };
+  return undefined;
+}
+
+async function hydrateSettlementBriefly(cerbanimo: CerbanimoClient, initial: TaskSettlementContext): Promise<TaskSettlementContext> {
+  const settlementId = initial.settlementId;
+  if (!settlementId || ["completed", "blocked", "failed", "cancelled"].includes(String(initial.status))) return initial;
+  const pollMs = Math.max(0, Number(process.env.KAMIYA_SETTLEMENT_POLL_MS ?? 1500));
+  const deadline = Date.now() + pollMs;
+  let current = initial;
+  while (Date.now() < deadline && ["pending", "queued", "running", "retry_wait"].includes(String(current.status))) {
+    await new Promise((resolve) => setTimeout(resolve, 250));
+    const hydrated = await cerbanimo.getSettlement(settlementId);
+    if (!hydrated.ok || !hydrated.data) break;
+    current = hydrated.data;
+  }
+  return current;
+}
+
+function settlementSession(session: ChatTurnRequest["session"], settlement: TaskSettlementContext): ChatTurnRequest["session"] {
+  const pendingAction = settlement.allowedActions?.confirm && settlement.action?.status === "previewed"
+    ? settlementActionPreview(settlement)
+    : undefined;
+  return {
+    ...session,
+    currentSettlementId: settlement.settlementId ?? settlement.settlementRecordId,
+    currentSettlementTaskId: settlement.task?.id,
+    pendingAction,
+    currentQuestProjectId: settlement.project?.id ?? session.currentQuestProjectId
+  };
+}
+
+function settlementActionPreview(settlement: TaskSettlementContext): NonNullable<ChatTurnResponse["session"]["pendingAction"]> {
+  const preview = settlement.action?.preview ?? {};
+  return {
+    id: crypto.randomUUID(),
+    kind: "settle_task",
+    title: String(preview.title ?? `Complete accepted task ${settlement.task?.id ?? ""}`),
+    summary: String(preview.summary ?? "Complete this accepted task and apply its configured consequences exactly once."),
+    risk: "high",
+    destructive: false,
+    payload: { settlementId: settlement.settlementId ?? settlement.settlementRecordId, taskId: settlement.task?.id },
+    requiredPermissions: ["tasks:write", "actions:write"],
+    createdAt: new Date().toISOString(),
+    cerbanimoActionId: settlement.action?.id ? String(settlement.action.id) : undefined,
+    cerbanimoActionUuid: settlement.action?.uuid ?? undefined,
+    functionName: "tasks.settle_completion"
+  };
+}
+
+function settlementResponseCopy(settlement: TaskSettlementContext, plain = false): string {
+  if (plain) {
+    if (settlement.status === "completed") return `Out of character: Cerbanimo committed task completion, ${settlement.rewards?.contributor?.length ?? 0} contributor reward event(s), ${settlement.rewards?.peerReviewers?.length ?? 0} counted peer reward event(s), ${settlement.rewards?.pmReviewer?.length ?? 0} counted PM reward event(s), ${settlement.skillChanges?.length ?? 0} skill update(s), and ${settlement.activatedTasks?.length ?? 0} dependent activation(s).`;
+    return `Out of character: settlement status is ${settlement.status}. ${settlement.lastError?.message ?? "No completion effects are being claimed."}`;
+  }
+  if (settlement.status === "completed") return "Cerbanimo committed the accepted task and every configured consequence exactly once. The completion card below contains only committed facts.";
+  if (["blocked", "failed", "retry_wait"].includes(String(settlement.status))) return "The judgment still stands, but Cerbanimo could not safely apply the consequences yet.";
+  if (settlement.status === "cancelled") return "The judgment still stands, but the settlement was cancelled before completion consequences committed.";
+  return "The review is accepted. Cerbanimo is applying completion, rewards, progression, and newly unlocked work.";
+}
+
+function settlementVerb(kind: SettlementCommand["kind"]): string {
+  if (kind === "retry") return "retry that settlement";
+  if (kind === "cancel") return "cancel that settlement";
+  if (kind === "preview") return "prepare that settlement";
+  return "load that settlement";
+}
+
 function splitOptionalAssignmentAndReason(input?: string): { assignmentId?: string; reason?: string } {
   const text = input?.trim();
   if (!text) return {};
@@ -1142,7 +1311,7 @@ function peerDecisionCopy(decision: string): string {
 }
 
 function pmDecisionCopy(decision: string): string {
-  if (decision === "seal") return "Ritual Seal recorded. The contribution is accepted pending settlement; completion and rewards wait for Packet 009.";
+  if (decision === "seal") return "Ritual Seal recorded. The contribution is accepted, and Cerbanimo is applying its configured completion consequences asynchronously.";
   if (decision === "request_changes") return "Project review requested changes. The evidence remains immutable and the contributor can create a superseding bundle.";
   if (decision === "reject") return "Project rejection recorded. The task remains uncompleted and no settlement occurred.";
   return "PM review decision recorded.";

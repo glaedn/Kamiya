@@ -39,23 +39,40 @@ function sanitizeAuth(auth: KamiyaAuthContext): KamiyaAuthContext {
 }
 
 function sanitizeSession(session: KamiyaSessionState): KamiyaSessionState {
+  const pendingPayload = session.pendingAction?.kind === "settle_task"
+    ? {
+        settlementId: session.pendingAction.payload.settlementId,
+        taskId: session.pendingAction.payload.taskId
+      }
+    : session.pendingAction
+      ? {
+          name: session.pendingAction.payload.name,
+          dueDate: session.pendingAction.payload.dueDate,
+          tags: session.pendingAction.payload.tags,
+          generationMode: session.pendingAction.payload.generationMode
+        }
+      : undefined;
+
   return {
     chatId: session.chatId,
     chatName: session.chatName,
     pendingAction: session.pendingAction
       ? {
           ...session.pendingAction,
-          payload: {
-            name: session.pendingAction.payload.name,
-            dueDate: session.pendingAction.payload.dueDate,
-            tags: session.pendingAction.payload.tags,
-            generationMode: session.pendingAction.payload.generationMode
-          }
+          payload: pendingPayload ?? {}
         }
       : undefined,
     planningDraft: session.planningDraft,
     planningDeadlinePrompted: session.planningDeadlinePrompted,
     mode: session.mode,
+    presentationMode: session.presentationMode,
+    narrativeIntensity: session.narrativeIntensity,
+    statDisplayMode: session.statDisplayMode,
+    preferredGenre: session.preferredGenre,
+    avoidThemes: session.avoidThemes,
+    currentQuestProjectId: session.currentQuestProjectId,
+    currentSettlementId: session.currentSettlementId,
+    currentSettlementTaskId: session.currentSettlementTaskId,
     lastProjectAction: undefined,
     actionHistory: session.actionHistory?.slice(0, 5),
     activeAction: session.activeAction,

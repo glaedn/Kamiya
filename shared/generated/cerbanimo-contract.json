@@ -1,0 +1,15 @@
+{
+  "contractVersion": "1.0.0",
+  "schemas": [
+    "CanonicalTask",
+    "TaskAutomation",
+    "EvidenceItem",
+    "EvidenceBundle",
+    "ValidationResult",
+    "ReviewRound",
+    "AcceptanceSettlement",
+    "DomainEventEnvelope",
+    "CommandActionPreview",
+    "KamiyaStructuredResponse"
+  ]
+}

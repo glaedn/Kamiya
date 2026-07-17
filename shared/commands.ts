@@ -7,6 +7,7 @@ export const slashCommands: SlashCommand[] = [
   { name: "/task", label: "Task", intent: "task_management", description: "Find, claim, update, or review tasks." },
   { name: "/submit", label: "Submit work", intent: "task_submission", description: "Submit proof for a completed task." },
   { name: "/reviews", label: "Reviews", intent: "task_management", description: "Open validation, peer Blessing, and PM review assignments." },
+  { name: "/settlement", label: "Settlement", intent: "task_management", description: "Show committed completion, reward, progression, and unlocked-task facts." },
   { name: "/community", label: "Community", intent: "community", description: "Browse, join, or inspect communities." },
   { name: "/search", label: "Search", intent: "search", description: "Search projects, tasks, people, skills, or communities." },
   { name: "/profile", label: "Profile", intent: "navigation", description: "Show a profile summary." },

@@ -24,7 +24,8 @@ import type {
   QuestProfileResponse,
   TaskEvidenceContext,
   TaskAutomationContext,
-  TaskReviewContext
+  TaskReviewContext,
+  TaskSettlementContext
 } from "../../shared/types";
 
 const apiEnvelopeSchema = z.object({
@@ -290,6 +291,84 @@ const reviewAllowedActionsSchema = z.object({
   seal: z.boolean().optional()
 }).partial().optional();
 
+const taskSettlementRewardSchema = z.object({
+  amount: z.coerce.number(),
+  tokenType: z.string(),
+  postedAt: z.string().optional().nullable()
+}).passthrough();
+
+const taskSettlementSchema = z.object({
+  settlementId: z.string().optional(),
+  settlementRecordId: z.union([z.number(), z.string()]).optional(),
+  status: z.string(),
+  attemptCount: z.number().optional(),
+  policyVersion: z.string().optional(),
+  task: z.object({
+    id: z.union([z.number(), z.string()]).optional(),
+    name: z.string().optional(),
+    status: z.string().optional(),
+    completedAt: z.string().optional().nullable()
+  }).optional(),
+  project: z.object({
+    id: z.union([z.number(), z.string()]).optional(),
+    name: z.string().optional(),
+    completed: z.boolean().optional(),
+    completedAt: z.string().optional().nullable(),
+    remainingRequiredTasks: z.number().optional()
+  }).optional(),
+  rewards: z.object({
+    contributor: z.array(taskSettlementRewardSchema).optional().default([]),
+    peerReviewers: z.array(taskSettlementRewardSchema).optional().default([]),
+    pmReviewer: z.array(taskSettlementRewardSchema).optional().default([])
+  }).optional(),
+  skillChanges: z.array(z.object({
+    skillId: z.union([z.number(), z.string()]),
+    xpDelta: z.number(),
+    previousXp: z.number(),
+    newXp: z.number(),
+    previousLevel: z.number(),
+    newLevel: z.number(),
+    levelChanged: z.boolean()
+  }).passthrough()).optional().default([]),
+  activatedTasks: z.array(z.object({
+    id: z.union([z.number(), z.string()]),
+    name: z.string().optional(),
+    status: z.string().optional()
+  }).passthrough()).optional().default([]),
+  storyEvent: z.object({ created: z.boolean().optional(), eventId: z.string().optional().nullable() }).optional(),
+  completionRecord: z.object({
+    id: z.union([z.number(), z.string()]).optional(),
+    uuid: z.string().optional(),
+    completedAt: z.string().optional().nullable()
+  }).optional().nullable(),
+  action: z.object({
+    id: z.union([z.number(), z.string()]),
+    uuid: z.string().optional().nullable(),
+    status: z.string().optional(),
+    preview: z.record(z.unknown()).optional().nullable()
+  }).optional().nullable(),
+  lastError: z.object({
+    code: z.string().optional(),
+    message: z.string().optional(),
+    retryable: z.boolean().optional(),
+    details: z.record(z.unknown()).optional()
+  }).optional().nullable(),
+  progress: z.object({
+    status: z.string().optional(),
+    stages: z.array(z.string()).optional().default([]),
+    eventCount: z.number().optional()
+  }).optional(),
+  effectSummary: z.record(z.number()).optional(),
+  copy: z.string().optional(),
+  allowedActions: z.object({
+    view: z.boolean().optional(),
+    confirm: z.boolean().optional(),
+    retry: z.boolean().optional(),
+    cancel: z.boolean().optional(),
+    reconcile: z.boolean().optional()
+  }).partial().optional()
+}).passthrough();
+
 const taskReviewRoundSchema = z.object({
   id: z.union([z.number(), z.string()]),
   round_uuid: z.string().optional().nullable(),
@@ -358,6 +437,7 @@ const taskReviewContextSchema = z.object({
   }).optional(),
   validation: z.record(z.unknown()).optional().nullable(),
   evidence: taskEvidenceContextSchema.optional().nullable(),
+  settlement: taskSettlementSchema.optional().nullable(),
   copy: z.string().optional(),
   allowedActions: reviewAllowedActionsSchema
 }).passthrough();
@@ -944,6 +1024,51 @@ export class CerbanimoClient {
     ) as Promise<CerbanimoResult<TaskReviewContext>>;
   }
 
+  async taskSettlement(taskId: string | number): Promise<CerbanimoResult<TaskSettlementContext>> {
+    return this.requestV1(
+      `/tasks/${encodeURIComponent(String(taskId))}/settlement`,
+      "GET",
+      undefined,
+      taskSettlementSchema
+    ) as Promise<CerbanimoResult<TaskSettlementContext>>;
+  }
+
+  async getSettlement(settlementId: string | number): Promise<CerbanimoResult<TaskSettlementContext>> {
+    return this.requestV1(
+      `/settlements/${encodeURIComponent(String(settlementId))}`,
+      "GET",
+      undefined,
+      taskSettlementSchema
+    ) as Promise<CerbanimoResult<TaskSettlementContext>>;
+  }
+
+  async previewTaskSettlement(taskId: string | number): Promise<CerbanimoResult<TaskSettlementContext>> {
+    return this.requestV1(
+      `/tasks/${encodeURIComponent(String(taskId))}/settlement/preview`,
+      "POST",
+      { sourceClient: "kamiya-web" },
+      taskSettlementSchema
+    ) as Promise<CerbanimoResult<TaskSettlementContext>>;
+  }
+
+  async retrySettlement(settlementId: string | number): Promise<CerbanimoResult<TaskSettlementContext>> {
+    return this.requestV1(
+      `/settlements/${encodeURIComponent(String(settlementId))}/retry`,
+      "POST",
+      {},
+      taskSettlementSchema
+    ) as Promise<CerbanimoResult<TaskSettlementContext>>;
+  }
+
+  async cancelSettlement(settlementId: string | number, reason = "Cancelled from Kamiya."): Promise<CerbanimoResult<TaskSettlementContext>> {
+    return this.requestV1(
+      `/settlements/${encodeURIComponent(String(settlementId))}/cancel`,
+      "POST",
+      { reason },
+      taskSettlementSchema
+    ) as Promise<CerbanimoResult<TaskSettlementContext>>;
+  }
+
   async getAutomationRun(runId: string | number): Promise<CerbanimoResult<AutomationRun>> {
     return this.requestV1(
       `/automation/runs/${encodeURIComponent(String(runId))}`,
@@ -1154,6 +1279,23 @@ export class CerbanimoClient {
           : { ok: true, data: { action: confirmed.data, automationRunError: run.error }, requestId: confirmed.requestId };
       }
       return this.request("/automation/actions", "POST", action.payload);
+    }
+
+    if (action.kind === "settle_task") {
+      const actionId = action.cerbanimoActionUuid ?? action.cerbanimoActionId;
+      const settlementId = action.payload.settlementId;
+      if (!actionId || (typeof settlementId !== "string" && typeof settlementId !== "number")) {
+        return {
+          ok: false,
+          error: "Kamiya cannot confirm this settlement because Cerbanimo did not return both the durable action and settlement identifiers."
+        };
+      }
+      const confirmed = await this.confirmAction(actionId);
+      if (!confirmed.ok) return confirmed;
+      const settlement = await this.getSettlement(settlementId);
+      return settlement.ok
+        ? { ok: true, data: { action: confirmed.data, settlement: settlement.data }, requestId: settlement.requestId ?? confirmed.requestId }
+        : settlement;
     }
 
     if (action.kind === "game_master") {

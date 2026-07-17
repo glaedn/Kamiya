@@ -1,5 +1,9 @@
 # Recommended Next Packets
 
+## Integration baseline completed on 2026-07-17
+
+Packets 008/009 are now implemented for the core slice: guided evidence intake, validation/review cards, reviewer decisions, and replay-safe completion settlement. The next priority is event-driven shared party communication and participant membership, followed by community venues/economy contracts and production-grade avatar/audio work. All remain subordinate to Cerbanimo's authoritative state and preview/confirmation rule.
+
 Evidence basis: Kamiya branch `kamiya/m3-task-automation-classification`; Cerbanimo branch `kamiya/m2-task-automation-classification`. Golden Conversation v1 now reaches active task classification, but task execution and assisted-input submission remain intentionally unimplemented.
 
 ## Completed Baseline: Packet 002 Project Creation Bootstrap

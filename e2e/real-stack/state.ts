@@ -17,11 +17,13 @@ export interface RealStackState {
   artifactDir: string;
   controlDir: string;
   cerbanimoRepoRoot: string;
+  resoneraRepoRoot: string;
   cerbanimoCommit: string;
   kamiyaCommit: string;
   webPort: number;
   apiPort: number;
   cerbanimoPort: number;
+  resoneraPort: number;
   cerbanimoOrigin: string;
   cerbanimoApiBase: string;
   database: {

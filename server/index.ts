@@ -12,10 +12,17 @@ import { extractString, extractText, toChannelOutbound } from "./services/channe
 const app = express();
 const port = Number(process.env.PORT ?? 4177);
 const distPath = path.resolve(process.cwd(), "dist");
+const allowedOrigins = (process.env.KAMIYA_ALLOWED_ORIGIN ?? "http://localhost:5173")
+  .split(",")
+  .map((value) => value.trim())
+  .filter(Boolean);
 
 app.use(
   cors({
-    origin: process.env.KAMIYA_ALLOWED_ORIGIN ?? "http://localhost:5173",
+    origin(origin, callback) {
+      if (!origin || allowedOrigins.includes(origin)) callback(null, true);
+      else callback(new Error(`Origin ${origin} is not allowed by Kamiya.`));
+    },
     credentials: true
   })
 );

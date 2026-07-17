@@ -14,6 +14,7 @@ interface Ports {
   webPort: number;
   apiPort: number;
   cerbanimoPort: number;
+  resoneraPort: number;
 }
 
 interface ChildHandle {
@@ -26,7 +27,8 @@ const args = parseArgs(process.argv.slice(2));
 const ports: Ports = {
   webPort: Number(args["web-port"] ?? process.env.KAMIYA_REAL_STACK_WEB_PORT ?? 5179),
   apiPort: Number(args["api-port"] ?? process.env.KAMIYA_REAL_STACK_API_PORT ?? 4181),
-  cerbanimoPort: Number(args["cerbanimo-port"] ?? process.env.KAMIYA_REAL_STACK_CERBANIMO_PORT ?? 4401)
+  cerbanimoPort: Number(args["cerbanimo-port"] ?? process.env.KAMIYA_REAL_STACK_CERBANIMO_PORT ?? 4401),
+  resoneraPort: Number(args["resonera-port"] ?? process.env.KAMIYA_REAL_STACK_RESONERA_PORT ?? 3011)
 };
 const stateFile = path.resolve(String(args["state-file"] ?? process.env.KAMIYA_REAL_STACK_STATE_FILE ?? path.join(rootDir, "node_modules/.cache/kamiya-real-stack/state.json")));
 const artifactDir = path.resolve("artifacts/golden-conversation");
@@ -36,6 +38,7 @@ const adminDatabaseUrl = process.env.KAMIYA_REAL_STACK_ADMIN_POSTGRES_URL ?? "po
 const e2eDatabaseName = safeDatabaseName(runId);
 const e2eDatabaseUrl = databaseUrlFor(adminDatabaseUrl, e2eDatabaseName);
 const cerbanimoRepoRoot = resolveCerbanimoRepoRoot();
+const resoneraRepoRoot = resolveResoneraRepoRoot();
 const children: ChildHandle[] = [];
 let shuttingDown = false;
 
@@ -78,11 +81,13 @@ async function main(): Promise<void> {
     artifactDir,
     controlDir,
     cerbanimoRepoRoot,
+    resoneraRepoRoot,
     cerbanimoCommit,
     kamiyaCommit,
     webPort: ports.webPort,
     apiPort: ports.apiPort,
     cerbanimoPort: ports.cerbanimoPort,
+    resoneraPort: ports.resoneraPort,
     cerbanimoOrigin: `http://127.0.0.1:${ports.cerbanimoPort}`,
     cerbanimoApiBase: `http://127.0.0.1:${ports.cerbanimoPort}`,
     database: {
@@ -94,6 +99,7 @@ async function main(): Promise<void> {
   };
   await fsp.writeFile(stateFile, JSON.stringify(state, null, 2));
 
+  await buildResoneraWeb(actors);
   startProcesses();
   await fsp.writeFile(stateFile, JSON.stringify({
     ...state,
@@ -102,6 +108,7 @@ async function main(): Promise<void> {
   await waitForUrl(`http://127.0.0.1:${ports.cerbanimoPort}/api/health`, "Cerbanimo E2E API");
   await waitForUrl(`http://127.0.0.1:${ports.apiPort}/api/health`, "Kamiya API");
   await waitForUrl(`http://127.0.0.1:${ports.webPort}/api/health`, "Kamiya Vite proxy");
+  await waitForUrl(`http://127.0.0.1:${ports.resoneraPort}`, "Resonera Expo web");
 
   console.log(`[real-stack] ready: web=http://127.0.0.1:${ports.webPort}, cerbanimo=http://127.0.0.1:${ports.cerbanimoPort}, db=${redactDatabaseUrl(e2eDatabaseUrl)}`);
   await new Promise(() => {});
@@ -142,6 +149,7 @@ async function initializeCerbanimoSchemaAndSeedActors() {
   const tasks = await importFromCerbanimo("models/tasks.js") as { createTaskTable: () => Promise<void> };
   const impact = await importFromCerbanimo("models/impact_v2.js") as { createImpactTables: () => Promise<void> };
   const kamiyaApi = await importFromCerbanimo("models/kamiya_api.js") as { createKamiyaApiTables: () => Promise<void>; hashApiToken: (token: string) => string };
+  const settlements = await importFromCerbanimo("models/task_settlements.js") as { createTaskSettlementTables: () => Promise<void> };
   const workflows = await importFromCerbanimo("models/workflows.js") as { createWorkflowTables: () => Promise<void> };
 
   await users.createUserTable();
@@ -154,6 +162,7 @@ async function initializeCerbanimoSchemaAndSeedActors() {
   await ensureBootstrapCompatibilityColumns();
   await impact.createImpactTables();
   await kamiyaApi.createKamiyaApiTables();
+  await settlements.createTaskSettlementTables();
   await workflows.createWorkflowTables();
   await ensurePgBossSchema();
 
@@ -202,6 +211,7 @@ async function ensurePgBossSchema(): Promise<void> {
   const { default: boss } = await import(`${moduleUrl}?run=${runId}`);
   await boss.start();
   await boss.createQueue("project-bootstrap").catch(() => {});
+  await boss.createQueue("task-completion-settlement").catch(() => {});
   await boss.stop();
 }
 
@@ -274,6 +284,8 @@ function startProcesses(): void {
       CERBANIMO_E2E_MODE: "true",
       CERBANIMO_PROJECT_BOOTSTRAP_PROVIDER: "deterministic",
       CERBANIMO_QUALITY_CHECK_EXECUTOR: "deterministic",
+      CERBANIMO_HUMAN_REVIEW_ENABLED: "true",
+      CERBANIMO_TASK_SETTLEMENT_ENABLED: "true",
       CERBANIMO_E2E_PROVIDER_CONTROL_DIR: controlDir
     }
   });
@@ -283,11 +295,12 @@ function startProcesses(): void {
     env: {
       ...process.env,
       PORT: String(ports.apiPort),
-      KAMIYA_ALLOWED_ORIGIN: `http://127.0.0.1:${ports.webPort}`,
+      KAMIYA_ALLOWED_ORIGIN: `http://127.0.0.1:${ports.webPort},http://127.0.0.1:${ports.resoneraPort}`,
       KAMIYA_CERBANIMO_API_URL: `http://127.0.0.1:${ports.cerbanimoPort}`,
       KAMIYA_CERBANIMO_TIMEOUT_MS: "10000",
       KAMIYA_REAL_STACK_E2E: "1",
       KAMIYA_AUTOMATION_CONFIRM_POLL_MS: "20000",
+      KAMIYA_SETTLEMENT_POLL_MS: process.env.KAMIYA_SETTLEMENT_POLL_MS ?? "0",
       KAMIYA_E2E_NOW: "2026-07-02T12:00:00.000-04:00",
       KAMIYA_DEFAULT_QUALITY_CHECK_REPOSITORY: "glaedn/Kamiya",
       KAMIYA_DEFAULT_QUALITY_CHECK_REF: "main",
@@ -306,6 +319,33 @@ function startProcesses(): void {
       VITE_CERBANIMO_API_BASE: `http://127.0.0.1:${ports.cerbanimoPort}`
     }
   });
+
+  spawnManaged("resonera", process.execPath, [path.join(rootDir, "node_modules/tsx/dist/cli.mjs"), "e2e/real-stack/static-server.ts", "--root", path.join(resoneraRepoRoot, "dist/e2e-web"), "--port", String(ports.resoneraPort)], {
+    cwd: rootDir,
+    env: {
+      ...process.env,
+      CI: "1"
+    }
+  });
+}
+
+async function buildResoneraWeb(actors: Awaited<ReturnType<typeof seedActors>>): Promise<void> {
+  const output = await runCapture(
+    process.execPath,
+    [path.join(resoneraRepoRoot, "node_modules/expo/bin/cli"), "export", "--platform", "web", "--clear", "--output-dir", "dist/e2e-web"],
+    resoneraRepoRoot,
+    {
+      ...process.env,
+      CI: "1",
+      NODE_ENV: "production",
+      BABEL_ENV: "production",
+      EXPO_PUBLIC_CERBANIMO_API_URL: `http://127.0.0.1:${ports.cerbanimoPort}/api/v1`,
+      EXPO_PUBLIC_CERBANIMO_API_TOKEN: actors.a.token,
+      EXPO_PUBLIC_KAMIYA_API_URL: `http://127.0.0.1:${ports.apiPort}`,
+      EXPO_PUBLIC_WORLD_POLL_MS: "1000"
+    }
+  );
+  await fsp.writeFile(path.join(artifactDir, "real-stack-resonera-export.log"), redactSecrets(output));
 }
 
 function spawnManaged(name: string, command: string, commandArgs: string[], options: { cwd: string; env: NodeJS.ProcessEnv }): void {
@@ -416,7 +456,9 @@ function resolveCerbanimoRepoRoot(): string {
   const configured = process.env.CERBANIMO_REPO_ROOT;
   const candidates = [
     configured,
+    path.resolve(rootDir, "..", "..", "codeprojects", "Cerbanimo"),
     path.resolve(rootDir, "..", "..", "codeprojects/cerbanimo-clone/Cerbanimo"),
+    "C:\\Users\\glaed\\codeprojects\\Cerbanimo",
     "C:\\Users\\glaed\\codeprojects\\cerbanimo-clone\\Cerbanimo"
   ].filter(Boolean) as string[];
 
@@ -426,6 +468,18 @@ function resolveCerbanimoRepoRoot(): string {
     }
   }
   throw new Error("Could not locate Cerbanimo checkout. Set CERBANIMO_REPO_ROOT.");
+}
+
+function resolveResoneraRepoRoot(): string {
+  const candidates = [
+    process.env.RESONERA_REPO_ROOT,
+    path.resolve(rootDir, "..", "..", "codeprojects", "resonera-github"),
+    "C:\\Users\\glaed\\codeprojects\\resonera-github"
+  ].filter(Boolean) as string[];
+  for (const candidate of candidates) {
+    if (fs.existsSync(path.join(candidate, "src/app/_layout.tsx"))) return path.resolve(candidate);
+  }
+  throw new Error("Could not locate Resonera checkout. Set RESONERA_REPO_ROOT.");
 }
 
 async function gitCommit(cwd: string): Promise<string> {
@@ -441,9 +495,9 @@ async function isGitAncestor(ancestor: string, descendant: string, cwd: string):
   });
 }
 
-async function runCapture(command: string, commandArgs: string[], cwd: string): Promise<string> {
+async function runCapture(command: string, commandArgs: string[], cwd: string, env: NodeJS.ProcessEnv = process.env): Promise<string> {
   return new Promise((resolve, reject) => {
-    const child = spawn(command, commandArgs, { cwd, windowsHide: true });
+    const child = spawn(command, commandArgs, { cwd, env, windowsHide: true });
     let output = "";
     let errorOutput = "";
     child.stdout.on("data", (data: Buffer) => { output += data.toString(); });

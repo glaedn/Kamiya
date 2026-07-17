@@ -94,6 +94,9 @@ export type CardKind =
   | "validation_report"
   | "review"
   | "review_assignment"
+  | "settlement_progress"
+  | "settlement_complete"
+  | "settlement_failure"
   | "mode"
   | "integration"
   | "approval"
@@ -149,6 +152,7 @@ export type ActionKind =
   | "join_community"
   | "claim_task"
   | "run_automation"
+  | "settle_task"
   | "open_page";
 
 export type AutomationWorkflowKind =
@@ -506,8 +510,50 @@ export interface TaskReviewContext {
   task?: { id?: number | string; name?: string; description?: string; status?: string };
   validation?: Record<string, unknown> | null;
   evidence?: TaskEvidenceContext | null;
+  settlement?: TaskSettlementContext | null;
   copy?: string;
   allowedActions?: ReviewAllowedActions;
+}
+
+export interface TaskSettlementReward {
+  amount: number;
+  tokenType: string;
+  postedAt?: string | null;
+}
+
+export interface TaskSettlementSkillChange {
+  skillId: number | string;
+  xpDelta: number;
+  previousXp: number;
+  newXp: number;
+  previousLevel: number;
+  newLevel: number;
+  levelChanged: boolean;
+}
+
+export interface TaskSettlementContext {
+  settlementId?: string;
+  settlementRecordId?: number | string;
+  status: "pending" | "queued" | "running" | "retry_wait" | "completed" | "blocked" | "failed" | "cancelled" | string;
+  attemptCount?: number;
+  policyVersion?: string;
+  task?: { id?: number | string; name?: string; status?: string; completedAt?: string | null };
+  project?: { id?: number | string; name?: string; completed?: boolean; completedAt?: string | null; remainingRequiredTasks?: number };
+  rewards?: {
+    contributor?: TaskSettlementReward[];
+    peerReviewers?: TaskSettlementReward[];
+    pmReviewer?: TaskSettlementReward[];
+  };
+  skillChanges?: TaskSettlementSkillChange[];
+  activatedTasks?: Array<{ id: number | string; name?: string; status?: string }>;
+  storyEvent?: { created?: boolean; eventId?: string | null };
+  completionRecord?: { id?: number | string; uuid?: string; completedAt?: string | null } | null;
+  action?: { id: number | string; uuid?: string | null; status?: string; preview?: Record<string, unknown> | null } | null;
+  lastError?: { code?: string; message?: string; retryable?: boolean; details?: Record<string, unknown> } | null;
+  progress?: { status?: string; stages?: string[]; eventCount?: number };
+  effectSummary?: Record<string, number>;
+  copy?: string;
+  allowedActions?: { view?: boolean; confirm?: boolean; retry?: boolean; cancel?: boolean; reconcile?: boolean };
 }
 
 export interface NarrativePreferences {
@@ -799,6 +845,8 @@ export interface KamiyaSessionState {
   preferredGenre?: string;
   avoidThemes?: string[];
   currentQuestProjectId?: number | string;
+  currentSettlementId?: number | string;
+  currentSettlementTaskId?: number | string;
   lastProjectAction?: ActionPreview;
   activeAction?: ActiveCerbanimoActionState;
   e2eScenario?: string;

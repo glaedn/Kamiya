@@ -26,6 +26,16 @@ let nextActionId = 1;
 let nextPreparationId = 1;
 let nextRunId = 1;
 const savedChats: unknown[] = [];
+const settlements = new Map<string, FixtureSettlement>();
+const settlementByTask = new Map<string, string>();
+
+interface FixtureSettlement {
+  value: Record<string, unknown>;
+  readCount: number;
+  retryCount: number;
+}
+
+resetSettlements();
 
 const app = express();
 app.use(express.json());
@@ -202,6 +212,56 @@ app.get("/api/v1/automation/runs/:id", (req, res) => {
   res.json(envelope(run, "fixture-run"));
 });
 
+app.get("/api/v1/tasks/:taskId/settlement", (req, res) => {
+  const settlementId = settlementByTask.get(String(req.params.taskId));
+  if (!settlementId) return res.status(404).json(errorEnvelope("SETTLEMENT_NOT_FOUND", "Settlement not found"));
+  res.json(envelope(readSettlement(settlementId), "fixture-task-settlement"));
+});
+
+app.get("/api/v1/settlements/:settlementId", (req, res) => {
+  const value = readSettlement(req.params.settlementId);
+  if (!value) return res.status(404).json(errorEnvelope("SETTLEMENT_NOT_FOUND", "Settlement not found"));
+  res.json(envelope(value, "fixture-settlement"));
+});
+
+app.post("/api/v1/tasks/:taskId/settlement/preview", (req, res) => {
+  const settlementId = settlementByTask.get(String(req.params.taskId));
+  if (!settlementId) return res.status(404).json(errorEnvelope("SETTLEMENT_NOT_FOUND", "No accepted review is ready for settlement"));
+  const state = settlements.get(settlementId)!;
+  res.status(201).json(envelope(state.value, "fixture-settlement-preview"));
+});
+
+app.post("/api/v1/settlements/:settlementId/retry", (req, res) => {
+  const state = settlements.get(req.params.settlementId);
+  if (!state) return res.status(404).json(errorEnvelope("SETTLEMENT_NOT_FOUND", "Settlement not found"));
+  if (!state.value.allowedActions || !(state.value.allowedActions as Record<string, unknown>).retry) {
+    return res.status(409).json(errorEnvelope("SETTLEMENT_NOT_RETRYABLE", "Settlement is not retryable"));
+  }
+  state.retryCount += 1;
+  state.readCount = 0;
+  state.value = {
+    ...state.value,
+    status: "queued",
+    attemptCount: Number(state.value.attemptCount ?? 1) + 1,
+    lastError: null,
+    progress: settlementProgress("queued"),
+    allowedActions: { view: true, retry: false, cancel: true, reconcile: false }
+  };
+  res.status(202).json(envelope(state.value, "fixture-settlement-retry"));
+});
+
+app.post("/api/v1/settlements/:settlementId/cancel", (req, res) => {
+  const state = settlements.get(req.params.settlementId);
+  if (!state) return res.status(404).json(errorEnvelope("SETTLEMENT_NOT_FOUND", "Settlement not found"));
+  state.value = {
+    ...state.value,
+    status: "cancelled",
+    lastError: { code: "SETTLEMENT_CANCELLED", message: "Settlement cancelled before commit.", retryable: true },
+    allowedActions: { view: true, retry: true, cancel: false, reconcile: false }
+  };
+  res.json(envelope(state.value, "fixture-settlement-cancel"));
+});
+
 app.get("/kamiya/chats", (_req, res) => {
   res.json({
     chats: savedChats.map((chat, index) => ({ id: index + 1, name: `E2E Quest ${index + 1}`, messageCount: 1 }))
@@ -241,7 +301,9 @@ app.get("/__fixture/state", (_req, res) => {
   res.json({
     actions: unique.length,
     confirms: unique.reduce((sum, action) => sum + action.confirmCount, 0),
-    projects: unique.filter((action) => detailFor(action).project).length
+    projects: unique.filter((action) => detailFor(action).project).length,
+    settlementReads: [...settlements.values()].reduce((sum, settlement) => sum + settlement.readCount, 0),
+    settlementRetries: [...settlements.values()].reduce((sum, settlement) => sum + settlement.retryCount, 0)
   });
 });
 
@@ -252,6 +314,7 @@ app.post("/__fixture/reset", (_req, res) => {
   nextActionId = 1;
   nextPreparationId = 1;
   nextRunId = 1;
+  resetSettlements();
   res.json({ ok: true });
 });
 
@@ -267,6 +330,7 @@ process.env.KAMIYA_CERBANIMO_TIMEOUT_MS = "5000";
 process.env.KAMIYA_E2E_NOW = "2026-07-02T12:00:00.000-04:00";
 process.env.KAMIYA_DEFAULT_QUALITY_CHECK_REPOSITORY = "glaedn/Kamiya";
 process.env.KAMIYA_DEFAULT_QUALITY_CHECK_REF = "main";
+process.env.KAMIYA_SETTLEMENT_POLL_MS = "0";
 
 await import("../../server/index");
 
@@ -507,6 +571,135 @@ function automationRun(runId: number, preparationId: number) {
       completedAt: "2026-07-02T12:00:09.000Z"
     },
     logs: [{ level: "info", message: "Automation run queued after action confirmation.", payload: {}, created_at: "2026-07-02T12:00:08.000Z" }]
+  };
+}
+
+function resetSettlements() {
+  settlements.clear();
+  settlementByTask.clear();
+  addSettlement("settlement-running", 901, pendingSettlement("settlement-running", 901));
+  addSettlement("settlement-complete", 902, completedSettlement("settlement-complete", 902));
+  addSettlement("settlement-blocked", 903, blockedSettlement());
+  addSettlement("settlement-retry", 904, retryableSettlement());
+  addSettlement("settlement-project-complete", 905, completedSettlement("settlement-project-complete", 905, true));
+}
+
+function addSettlement(settlementId: string, taskId: number, value: Record<string, unknown>) {
+  settlements.set(settlementId, { value, readCount: 0, retryCount: 0 });
+  settlementByTask.set(String(taskId), settlementId);
+}
+
+function readSettlement(settlementId: string): Record<string, unknown> | undefined {
+  const state = settlements.get(settlementId);
+  if (!state) return undefined;
+  state.readCount += 1;
+  if (settlementId === "settlement-running" && state.readCount >= 2) {
+    state.value = completedSettlement(settlementId, 901);
+  }
+  if (settlementId === "settlement-retry" && state.retryCount > 0 && state.readCount >= 1) {
+    state.value = completedSettlement(settlementId, 904);
+  }
+  return state.value;
+}
+
+function pendingSettlement(settlementId: string, taskId: number) {
+  return {
+    settlementId,
+    settlementRecordId: taskId + 1000,
+    status: "running",
+    attemptCount: 1,
+    policyVersion: "task-settlement-v1",
+    task: { id: taskId, name: "Ship the accepted prototype", status: "submitted", completedAt: null },
+    project: { id: 100, name: "Build a Democratic Digital Economy", completed: false, completedAt: null, remainingRequiredTasks: 3 },
+    rewards: { contributor: [], peerReviewers: [], pmReviewer: [] },
+    skillChanges: [],
+    activatedTasks: [],
+    storyEvent: { created: false, eventId: null },
+    completionRecord: null,
+    progress: settlementProgress("running"),
+    effectSummary: { planned: 10 },
+    copy: "The review is accepted. Cerbanimo is applying completion consequences.",
+    allowedActions: { view: true, confirm: false, retry: false, cancel: true, reconcile: false }
+  };
+}
+
+function completedSettlement(settlementId: string, taskId: number, projectCompleted = false) {
+  const completedAt = "2026-07-02T12:30:00.000Z";
+  return {
+    settlementId,
+    settlementRecordId: taskId + 1000,
+    status: "completed",
+    attemptCount: 1,
+    policyVersion: "task-settlement-v1",
+    task: { id: taskId, name: projectCompleted ? "Complete launch readiness" : "Ship the accepted prototype", status: "completed", completedAt },
+    project: { id: 100, name: "Build a Democratic Digital Economy", completed: projectCompleted, completedAt: projectCompleted ? completedAt : null, remainingRequiredTasks: projectCompleted ? 0 : 2 },
+    rewards: {
+      contributor: [{ amount: 40, tokenType: "project", postedAt: completedAt }],
+      peerReviewers: [
+        { amount: 10, tokenType: "cotoken", postedAt: completedAt },
+        { amount: 10, tokenType: "cotoken", postedAt: completedAt },
+        { amount: 10, tokenType: "cotoken", postedAt: completedAt }
+      ],
+      pmReviewer: [{ amount: 10, tokenType: "project_or_community", postedAt: completedAt }]
+    },
+    skillChanges: [{ skillId: 7, xpDelta: 80, previousXp: 80, newXp: 160, previousLevel: 2, newLevel: 3, levelChanged: true }],
+    activatedTasks: projectCompleted ? [] : [
+      { id: 910, name: "Invite pilot participants", status: "active-unassigned" },
+      { id: 911, name: "Open governance rehearsal", status: "active-unassigned" }
+    ],
+    storyEvent: { created: true, eventId: `story-${taskId}` },
+    completionRecord: { id: taskId + 2000, uuid: `completion-${taskId}`, completedAt },
+    progress: settlementProgress("completed"),
+    effectSummary: { applied: projectCompleted ? 11 : 13 },
+    copy: "The accepted task is complete.",
+    allowedActions: { view: true, confirm: false, retry: false, cancel: false, reconcile: false }
+  };
+}
+
+function blockedSettlement() {
+  return {
+    ...pendingSettlement("settlement-blocked", 903),
+    status: "blocked",
+    task: { id: 903, name: "Publish the treasury policy", status: "submitted", completedAt: null },
+    lastError: {
+      code: "SETTLEMENT_REWARD_POLICY_MISSING",
+      message: "The contributor reward amount is not configured.",
+      retryable: false
+    },
+    progress: settlementProgress("blocked"),
+    allowedActions: { view: true, retry: false, cancel: false, reconcile: false }
+  };
+}
+
+function retryableSettlement() {
+  return {
+    ...pendingSettlement("settlement-retry", 904),
+    status: "retry_wait",
+    task: { id: 904, name: "Record the quality handoff", status: "submitted", completedAt: null },
+    lastError: {
+      code: "SETTLEMENT_QUEUE_FAILED",
+      message: "The settlement worker was temporarily unavailable.",
+      retryable: true
+    },
+    progress: settlementProgress("retry_wait"),
+    allowedActions: { view: true, retry: true, cancel: true, reconcile: false }
+  };
+}
+
+function settlementProgress(status: string) {
+  return {
+    status,
+    stages: [
+      "Verifying the accepted judgment",
+      "Recording task completion",
+      "Posting contributor rewards",
+      "Honoring reviewer rewards",
+      "Updating skills",
+      "Opening newly available work",
+      "Writing the canonical Chronicle",
+      "Finalizing settlement"
+    ],
+    eventCount: status === "completed" ? 12 : 1
   };
 }
 
