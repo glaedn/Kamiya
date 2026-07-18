@@ -7,10 +7,12 @@ describe("Kamiya CORS policy", () => {
 
     expect(allowedOrigins).toEqual([
       "http://localhost:5173",
-      "http://localhost:3000"
+      "http://localhost:3000",
+      "http://localhost:3001"
     ]);
     expect(isAllowedOrigin("http://localhost:5173", allowedOrigins)).toBe(true);
     expect(isAllowedOrigin("http://localhost:3000", allowedOrigins)).toBe(true);
+    expect(isAllowedOrigin("http://localhost:3001", allowedOrigins)).toBe(true);
   });
 
   it("uses the configured allowlist without admitting arbitrary origins", () => {

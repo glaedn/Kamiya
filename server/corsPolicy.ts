@@ -1,6 +1,7 @@
 export const LOCAL_DEVELOPMENT_ORIGINS = [
   "http://localhost:5173",
-  "http://localhost:3000"
+  "http://localhost:3000",
+  "http://localhost:3001"
 ] as const;
 
 export function parseAllowedOrigins(configuredOrigins = process.env.KAMIYA_ALLOWED_ORIGIN): string[] {
