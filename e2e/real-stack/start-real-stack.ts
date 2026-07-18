@@ -222,6 +222,7 @@ async function seedActors(hashApiToken: (token: string) => string) {
   const scopes = [
     "profile:read",
     "projects:read",
+    "communities:read",
     "projects:write",
     "tasks:read",
     "tasks:write",

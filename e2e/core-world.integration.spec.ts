@@ -18,6 +18,14 @@ test("one committed settlement becomes the same world fact in Kamiya and Resoner
   expect(contract.headers()["x-cerbanimo-contract-version"]).toBe("1.0.0");
   expect(contract.headers()["x-cerbanimo-contract-digest"]).toMatch(/^sha256:[a-f0-9]{64}$/);
 
+  const atlasResponse = await page.request.get(`${state.cerbanimoOrigin}/api/v1/me/atlas`, {
+    headers: bearerHeaders(state.actors.a)
+  });
+  const atlasEnvelope = await atlasResponse.json();
+  expect(atlasResponse.ok(), JSON.stringify(atlasEnvelope)).toBe(true);
+  expect(atlasEnvelope.data.actor).toMatchObject({ id: state.actors.a.id, username: state.actors.a.username });
+  expect(atlasEnvelope.data.projects.map((project: { id: number }) => Number(project.id))).toContain(Number(seed.projectId));
+
   for (const path of [
     `/api/v1/projects/${seed.projectId}/world-state`,
     `/api/v1/tasks/${seed.taskId}/settlement`,
