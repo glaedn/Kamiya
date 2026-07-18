@@ -5,6 +5,7 @@ import fs from "node:fs";
 import path from "node:path";
 import { z } from "zod";
 import type { ChatTurnRequest } from "../shared/types";
+import { isAllowedOrigin, parseAllowedOrigins } from "./corsPolicy";
 import { handleChannelTurn, handleChatTurn, hydrateActionResponse } from "./services/chatService";
 import { CerbanimoClient } from "./services/cerbanimoClient";
 import { extractString, extractText, toChannelOutbound } from "./services/channelAdapter";
@@ -12,15 +13,12 @@ import { extractString, extractText, toChannelOutbound } from "./services/channe
 const app = express();
 const port = Number(process.env.PORT ?? 4177);
 const distPath = path.resolve(process.cwd(), "dist");
-const allowedOrigins = (process.env.KAMIYA_ALLOWED_ORIGIN ?? "http://localhost:5173")
-  .split(",")
-  .map((value) => value.trim())
-  .filter(Boolean);
+const allowedOrigins = parseAllowedOrigins();
 
 app.use(
   cors({
     origin(origin, callback) {
-      if (!origin || allowedOrigins.includes(origin)) callback(null, true);
+      if (isAllowedOrigin(origin, allowedOrigins)) callback(null, true);
       else callback(new Error(`Origin ${origin} is not allowed by Kamiya.`));
     },
     credentials: true

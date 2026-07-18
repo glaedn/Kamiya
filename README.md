@@ -83,7 +83,7 @@ Copy `.env.example` to `.env` and configure:
 - `KAMIYA_CERBANIMO_BEARER_TOKEN`: server-side Cerbanimo bearer token. This is never entered in the browser.
 - `VITE_CERBANIMO_ORIGIN`: Cerbanimo frontend origin that hosts `/auth/bridge/start`.
 - `VITE_CERBANIMO_API_BASE`: Cerbanimo API base used for user-scoped Auth0 token calls.
-- `KAMIYA_ALLOWED_ORIGIN`: web client origin for CORS.
+- `KAMIYA_ALLOWED_ORIGIN`: comma-separated web client origins for CORS. Local defaults include Kamiya on `http://localhost:5173` and Resonera on `http://localhost:3000`.
 - `KAMIYA_CERBANIMO_TIMEOUT_MS`: optional server-side timeout for Cerbanimo API requests.
 - `KAMIYA_DEFAULT_QUALITY_CHECK_REPOSITORY`: optional `owner/repository` default for the Packet 006 quality-check flow.
 - `KAMIYA_DEFAULT_QUALITY_CHECK_REF`: optional default ref for quality checks.
