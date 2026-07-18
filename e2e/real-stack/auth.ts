@@ -4,7 +4,7 @@ import { readRealStackState, type RealStackActor } from "./state";
 export async function seedRealStackAuth(page: Page, input: {
   scenario: string;
   runId: string;
-  actor?: "a" | "b";
+  actor?: "a" | "b" | "c";
   activeAction?: Record<string, unknown>;
 }): Promise<void> {
   const state = readRealStackState();

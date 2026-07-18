@@ -1,4 +1,5 @@
 import { z } from "zod";
+import { checkCerbanimoContractIdentity } from "../../shared/cerbanimoContract";
 import type {
   ActionPreview,
   ActiveCerbanimoActionState,
@@ -689,6 +690,28 @@ const automationRunSchema = z.object({
 
 const defaultRequestTimeoutMs = 15_000;
 
+export function normalizeCerbanimoApiUrl(
+  value: string | undefined,
+  options: { allowLoopback?: boolean; allowedOrigins?: string[] } = {}
+): string {
+  if (!value) return "";
+  let parsed: URL;
+  try {
+    parsed = new URL(value);
+  } catch {
+    return "";
+  }
+  if (!['http:', 'https:'].includes(parsed.protocol) || parsed.username || parsed.password) return "";
+  const hostname = parsed.hostname.toLowerCase();
+  const loopback = hostname === 'localhost' || hostname === '::1' || /^127(?:\.\d{1,3}){3}$/.test(hostname);
+  const allowedOrigins = new Set((options.allowedOrigins || []).flatMap(origin => {
+    try { return [new URL(origin).origin]; } catch { return []; }
+  }));
+  if (options.allowLoopback && loopback) return parsed.toString().replace(/\/$/, "");
+  if (parsed.protocol === 'https:' && allowedOrigins.has(parsed.origin)) return parsed.toString().replace(/\/$/, "");
+  return "";
+}
+
 export class CerbanimoClient {
   private readonly apiUrl: string;
   private readonly token?: string;
@@ -696,7 +719,18 @@ export class CerbanimoClient {
 
   constructor(auth: KamiyaAuthContext) {
     this.auth = auth;
-    this.apiUrl = process.env.KAMIYA_CERBANIMO_API_URL || auth.cerbanimoApiUrl || "";
+    const configuredApiUrl = process.env.KAMIYA_CERBANIMO_API_URL || "";
+    const configuredOrigin = (() => {
+      try { return configuredApiUrl ? new URL(configuredApiUrl).origin : ""; } catch { return ""; }
+    })();
+    const allowedOrigins = [
+      configuredOrigin,
+      ...(process.env.KAMIYA_CERBANIMO_ALLOWED_ORIGINS || "").split(',').map(value => value.trim())
+    ].filter(Boolean);
+    this.apiUrl = normalizeCerbanimoApiUrl(configuredApiUrl || auth.cerbanimoApiUrl, {
+      allowLoopback: process.env.NODE_ENV !== 'production',
+      allowedOrigins
+    });
     this.token = auth.cerbanimoToken || process.env.KAMIYA_CERBANIMO_BEARER_TOKEN;
   }
 
@@ -1544,14 +1578,20 @@ export class CerbanimoClient {
 
     const normalizedPath = path.startsWith("/") ? path : `/${path}`;
     const v1Path = normalizedPath.startsWith("/api/v1/") ? normalizedPath : `/api/v1${normalizedPath}`;
-    return this.requestRaw(`${this.apiUrl}${v1Path}`, method, body, schema);
+    return this.requestRaw(`${this.apiUrl}${v1Path}`, method, body, schema, true);
   }
 
   private async request(path: string, method: string, body?: unknown): Promise<CerbanimoResult> {
     return this.requestRaw(`${this.apiUrl}${path}`, method, body);
   }
 
-  private async requestRaw<T>(url: string, method: string, body?: unknown, schema?: z.ZodType<T>): Promise<CerbanimoResult<T>> {
+  private async requestRaw<T>(
+    url: string,
+    method: string,
+    body?: unknown,
+    schema?: z.ZodType<T>,
+    requireContractIdentity = false
+  ): Promise<CerbanimoResult<T>> {
     const controller = new AbortController();
     const timeout = setTimeout(() => controller.abort(), Number(process.env.KAMIYA_CERBANIMO_TIMEOUT_MS ?? defaultRequestTimeoutMs));
 
@@ -1576,6 +1616,23 @@ export class CerbanimoClient {
       };
     } finally {
       clearTimeout(timeout);
+    }
+
+    if (requireContractIdentity) {
+      const compatibility = checkCerbanimoContractIdentity(
+        response.headers?.get("x-cerbanimo-contract-version"),
+        response.headers?.get("x-cerbanimo-contract-digest")
+      );
+      if (!compatibility.compatible) {
+        return {
+          ok: false,
+          error: compatibility.reason,
+          code: "CONTRACT_INCOMPATIBLE",
+          status: response.status,
+          requestId: response.headers?.get("x-request-id") ?? undefined,
+          retryable: false
+        };
+      }
     }
 
     const data = await response.json().catch(() => undefined);

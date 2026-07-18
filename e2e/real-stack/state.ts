@@ -34,6 +34,7 @@ export interface RealStackState {
   actors: {
     a: RealStackActor;
     b: RealStackActor;
+    c: RealStackActor;
   };
 }
 

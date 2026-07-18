@@ -1,4 +1,5 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
+import { CERBANIMO_CONTRACT_DIGEST, CERBANIMO_CONTRACT_VERSION } from "../../shared/cerbanimoContract";
 import { handleChatTurn } from "./chatService";
 
 describe("handleChatTurn", () => {
@@ -154,7 +155,7 @@ describe("handleChatTurn", () => {
       .fn()
       .mockResolvedValueOnce({
         ok: true,
-        headers: new Headers({ "x-request-id": "req-preview" }),
+        headers: contractHeaders("req-preview"),
         json: async () => ({
           ok: true,
           data: actionRow("previewed"),
@@ -165,12 +166,12 @@ describe("handleChatTurn", () => {
       .mockResolvedValueOnce({
         ok: true,
         status: 202,
-        headers: new Headers({ "x-request-id": "req-confirm" }),
+        headers: contractHeaders("req-confirm"),
         json: async () => ({ ok: true, data: actionRow("confirmed"), error: null, requestId: "req-confirm" })
       })
       .mockResolvedValueOnce({
         ok: true,
-        headers: new Headers({ "x-request-id": "req-detail" }),
+        headers: contractHeaders("req-detail"),
         json: async () => ({ ok: true, data: completedDetail(), error: null, requestId: "req-detail" })
       });
     vi.stubGlobal("fetch", fetchMock);
@@ -605,7 +606,7 @@ function mockPreviewFetch() {
     vi.fn().mockResolvedValue({
       ok: true,
       status: 201,
-      headers: new Headers({ "x-request-id": "req-preview" }),
+      headers: contractHeaders("req-preview"),
       json: async () => ({
         ok: true,
         data: actionRow("previewed"),
@@ -966,9 +967,17 @@ function jsonResponse(body: unknown, status = 200) {
     ok: status < 400,
     status,
     statusText: status < 400 ? "OK" : "Bad Request",
-    headers: new Headers({ "x-request-id": (body as { requestId?: string }).requestId ?? "req-test" }),
+    headers: contractHeaders((body as { requestId?: string }).requestId ?? "req-test"),
     json: async () => body
   };
+}
+
+function contractHeaders(requestId: string) {
+  return new Headers({
+    "x-request-id": requestId,
+    "x-cerbanimo-contract-version": CERBANIMO_CONTRACT_VERSION,
+    "x-cerbanimo-contract-digest": CERBANIMO_CONTRACT_DIGEST
+  });
 }
 
 function lastDayOfNextMonth(): string {

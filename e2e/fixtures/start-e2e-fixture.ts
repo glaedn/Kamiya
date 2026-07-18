@@ -1,4 +1,5 @@
 import express from "express";
+import { CERBANIMO_CONTRACT_DIGEST, CERBANIMO_CONTRACT_VERSION } from "../../shared/cerbanimoContract";
 
 const args = new Map(process.argv.slice(2).map((arg, index, all) => [arg, all[index + 1]]));
 const kamiyaPort = Number(args.get("--port") ?? process.env.PORT ?? 4178);
@@ -39,6 +40,11 @@ resetSettlements();
 
 const app = express();
 app.use(express.json());
+app.use("/api/v1", (_req, res, next) => {
+  res.setHeader("x-cerbanimo-contract-version", CERBANIMO_CONTRACT_VERSION);
+  res.setHeader("x-cerbanimo-contract-digest", CERBANIMO_CONTRACT_DIGEST);
+  next();
+});
 
 app.get("/api/health", (_req, res) => {
   res.json({ ok: true, service: "cerbanimo-e2e-fixture" });

@@ -1,6 +1,7 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
 import type { ActionPreview } from "../../shared/types";
-import { CerbanimoClient } from "./cerbanimoClient";
+import { CERBANIMO_CONTRACT_DIGEST, CERBANIMO_CONTRACT_VERSION } from "../../shared/cerbanimoContract";
+import { CerbanimoClient, normalizeCerbanimoApiUrl } from "./cerbanimoClient";
 
 const auth = {
   isLoggedIn: true,
@@ -258,6 +259,18 @@ describe("CerbanimoClient /api/v1 action contract", () => {
     expect(fetchMock.mock.calls[1][0]).toBe("http://localhost:4000/api/v1/review-rounds/round-701/pm-decisions");
   });
 
+  it("rejects a stale server contract before parsing its payload", async () => {
+    vi.stubGlobal("fetch", vi.fn().mockResolvedValue(jsonResponse(
+      { ok: true, data: { actions: [] }, error: null },
+      200,
+      { digest: "sha256:stale" }
+    )));
+
+    const result = await new CerbanimoClient(auth).listActions();
+
+    expect(result).toMatchObject({ ok: false, code: "CONTRACT_INCOMPATIBLE", retryable: false });
+  });
+
   it("hydrates canonical settlement facts without requiring raw ledger internals", async () => {
     const fetchMock = mockFetch({
       ok: true,
@@ -481,6 +494,19 @@ describe("CerbanimoClient /api/v1 action contract", () => {
     expect(redeemed.data?.calling?.roleArchetype).toBe("party_member");
     expect(fetchMock.mock.calls[0][0]).toBe("http://localhost:4000/api/v1/projects/100/invites");
     expect(fetchMock.mock.calls[1][0]).toBe("http://localhost:4000/api/v1/project-invites/raw-token/redeem");
+  });
+});
+
+describe("Cerbanimo API destination policy", () => {
+  it("allows loopback only when explicitly in development mode", () => {
+    expect(normalizeCerbanimoApiUrl("http://127.0.0.1:4000", { allowLoopback: true })).toBe("http://127.0.0.1:4000");
+    expect(normalizeCerbanimoApiUrl("http://127.0.0.1:4000", { allowLoopback: false })).toBe("");
+  });
+
+  it("requires an allowlisted HTTPS origin for remote token forwarding", () => {
+    expect(normalizeCerbanimoApiUrl("https://cerbanimo.example/api", { allowedOrigins: ["https://cerbanimo.example"] })).toBe("https://cerbanimo.example/api");
+    expect(normalizeCerbanimoApiUrl("https://attacker.example/collect", { allowedOrigins: ["https://cerbanimo.example"] })).toBe("");
+    expect(normalizeCerbanimoApiUrl("javascript:alert(1)", { allowedOrigins: ["https://cerbanimo.example"] })).toBe("");
   });
 });
 
@@ -748,12 +774,24 @@ function mockFetch(body: unknown, status = 200) {
   return fetchMock;
 }
 
-function jsonResponse(body: unknown, status = 200) {
+function jsonResponse(
+  body: unknown,
+  status = 200,
+  contract: { version?: string; digest?: string } = {}
+) {
   return {
     ok: status < 400,
     status,
     statusText: status < 400 ? "OK" : "Bad Request",
-    headers: new Headers({ "x-request-id": (body as { requestId?: string }).requestId ?? "req-test" }),
+    headers: contractHeaders((body as { requestId?: string }).requestId ?? "req-test", contract),
     json: async () => body
   };
+}
+
+function contractHeaders(requestId: string, contract: { version?: string; digest?: string } = {}) {
+  return new Headers({
+    "x-request-id": requestId,
+    "x-cerbanimo-contract-version": contract.version ?? CERBANIMO_CONTRACT_VERSION,
+    "x-cerbanimo-contract-digest": contract.digest ?? CERBANIMO_CONTRACT_DIGEST
+  });
 }

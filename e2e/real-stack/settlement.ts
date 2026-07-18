@@ -37,8 +37,8 @@ export async function seedAcceptedSettlement(options: SettlementSeedOptions = {}
     }
 
     const project = (await client.query(
-      `INSERT INTO projects (name, description, creator_id, status, settlement_policy)
-       VALUES ($1, 'Packet 009 real-stack settlement fixture.', $2, 'active', '{}'::jsonb)
+      `INSERT INTO projects (name, description, creator_id, status, visibility, settlement_policy)
+       VALUES ($1, 'Packet 009 real-stack settlement fixture.', $2, 'active', 'private', '{}'::jsonb)
        RETURNING id`,
       [`Settlement Quest ${key}`, state.actors.b.id]
     )).rows[0];
@@ -211,12 +211,37 @@ export async function settlementReport(seed: SettlementSeed) {
       [settlement.id, seed.dependentTaskIds]
     )).rows[0];
     const task = (await client.query(`SELECT status FROM tasks WHERE id = $1`, [seed.taskId])).rows[0];
+    const project = (await client.query(`SELECT status FROM projects WHERE id = $1`, [seed.projectId])).rows[0];
     const acceptance = (await client.query(`SELECT settlement_status FROM task_acceptance_records WHERE task_id = $1 ORDER BY id DESC LIMIT 1`, [seed.taskId])).rows[0];
+    const rewardRows = (await client.query(
+      `SELECT user_id, reward_role, amount, token_type
+       FROM reward_ledger_events WHERE settlement_id = $1
+       ORDER BY reward_role, user_id`,
+      [settlement.id]
+    )).rows;
+    const xpRows = (await client.query(
+      `SELECT user_id, xp_delta FROM skill_xp_events WHERE settlement_id = $1 ORDER BY user_id`,
+      [settlement.id]
+    )).rows;
+    const eventRows = (await client.query(
+      `SELECT sequence, event_type FROM domain_events WHERE project_id = $1 ORDER BY sequence`,
+      [seed.projectId]
+    )).rows;
+    const dependentRows = seed.dependentTaskIds.length
+      ? (await client.query(`SELECT id, status FROM tasks WHERE id = ANY($1::int[]) ORDER BY id`, [seed.dependentTaskIds])).rows
+      : [];
+    const rewardAllocations = rewardRows.map(row => ({
+      userId: Number(row.user_id),
+      role: String(row.reward_role),
+      amount: Number(row.amount),
+      tokenType: String(row.token_type)
+    }));
     return {
       status: settlement.status,
       settlementId: String(settlement.settlement_uuid),
       taskStatus: task?.status,
       acceptanceStatus: acceptance?.settlement_status,
+      projectStatus: project?.status,
       attemptCount: Number(settlement.attempt_count || 0),
       completions: Number(counts.completions),
       rewards: Number(counts.rewards),
@@ -224,7 +249,13 @@ export async function settlementReport(seed: SettlementSeed) {
       completionEvents: Number(counts.completion_events),
       outbox: Number(counts.outbox),
       outboxDelivered: Number(counts.outbox_delivered),
-      activated: Number(counts.activated)
+      activated: Number(counts.activated),
+      rewardAllocations,
+      rewardTotal: rewardAllocations.reduce((sum, reward) => sum + reward.amount, 0),
+      xpAllocations: xpRows.map(row => ({ userId: Number(row.user_id), xpDelta: Number(row.xp_delta) })),
+      eventSequences: eventRows.map(row => Number(row.sequence)),
+      eventTypes: eventRows.map(row => String(row.event_type)),
+      dependentStatuses: dependentRows.map(row => ({ id: Number(row.id), status: String(row.status) }))
     };
   } finally {
     await client.end();
@@ -245,7 +276,18 @@ export async function expectCommittedSettlement(seed: SettlementSeed) {
     completionEvents: 1,
     outbox: 4,
     outboxDelivered: 4,
-    activated: seed.dependentTaskIds.length
+    activated: seed.dependentTaskIds.length,
+    rewardTotal: 80,
+    xpAllocations: [{ userId: seed.contributorId, xpDelta: 40 }],
+    eventTypes: ["task.completed", "reward.released", "dependencies.activated", "chronicle.entry_created"]
   });
+  expect(report.rewardAllocations).toEqual([
+    { userId: seed.contributorId, role: "contributor", amount: 40, tokenType: "Cerbanimo Coin" },
+    ...seed.peerIds.map(userId => ({ userId, role: "peer_reviewer", amount: 10, tokenType: "Cerbanimo Coin" })),
+    { userId: seed.pmId, role: "pm_reviewer", amount: 10, tokenType: "Cerbanimo Coin" }
+  ]);
+  expect(new Set(report.eventSequences).size).toBe(report.eventSequences.length);
+  expect([...report.eventSequences].sort((a, b) => a - b)).toEqual(report.eventSequences);
+  expect(report.dependentStatuses.every(task => task.status.startsWith("active"))).toBe(true);
   return report;
 }

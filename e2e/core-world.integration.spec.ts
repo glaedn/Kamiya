@@ -2,6 +2,7 @@ import { expect, test, type Page } from "@playwright/test";
 import { seedRealStackAuth } from "./real-stack/auth";
 import { readRealStackState, scenarioRunId } from "./real-stack/state";
 import { expectCommittedSettlement, seedAcceptedSettlement } from "./real-stack/settlement";
+import { bearerHeaders } from "./real-stack/auth";
 
 test("one committed settlement becomes the same world fact in Kamiya and Resonera", async ({ page, browser }) => {
   const seed = await seedAcceptedSettlement();
@@ -12,6 +13,41 @@ test("one committed settlement becomes the same world fact in Kamiya and Resoner
   const report = await expectCommittedSettlement(seed);
 
   const state = readRealStackState();
+  const contract = await page.request.get(`${state.cerbanimoOrigin}/api/v1/contract`);
+  expect(contract.ok()).toBe(true);
+  expect(contract.headers()["x-cerbanimo-contract-version"]).toBe("1.0.0");
+  expect(contract.headers()["x-cerbanimo-contract-digest"]).toMatch(/^sha256:[a-f0-9]{64}$/);
+
+  for (const path of [
+    `/api/v1/projects/${seed.projectId}/world-state`,
+    `/api/v1/tasks/${seed.taskId}/settlement`,
+    `/api/v1/tasks/${seed.taskId}/evidence`,
+    `/api/v1/events?projectId=${seed.projectId}`
+  ]) {
+    const denied = await page.request.get(`${state.cerbanimoOrigin}${path}`, { headers: bearerHeaders(state.actors.c) });
+    expect(denied.status(), `unrelated actor should be denied ${path}`).toBe(403);
+    expect(denied.headers()["x-cerbanimo-contract-digest"]).toBe(contract.headers()["x-cerbanimo-contract-digest"]);
+  }
+
+  const eventsResponse = await page.request.get(`${state.cerbanimoOrigin}/api/v1/events?projectId=${seed.projectId}`, {
+    headers: bearerHeaders(state.actors.a)
+  });
+  expect(eventsResponse.ok()).toBe(true);
+  const eventEnvelope = await eventsResponse.json();
+  expect(eventEnvelope.data.events.map((event: { eventType: string }) => event.eventType)).toEqual(report.eventTypes);
+  const replay = await page.request.get(
+    `${state.cerbanimoOrigin}/api/v1/events?projectId=${seed.projectId}&after=${eventEnvelope.data.nextCursor}`,
+    { headers: bearerHeaders(state.actors.a) }
+  );
+  expect((await replay.json()).data).toEqual({ events: [], nextCursor: eventEnvelope.data.nextCursor });
+
+  const settlementReplay = await page.request.post(`${state.cerbanimoOrigin}/api/v1/tasks/${seed.taskId}/settlement/preview`, {
+    headers: bearerHeaders(state.actors.a),
+    data: { sourceClient: "core-world-replay-audit" }
+  });
+  expect(settlementReplay.ok()).toBe(true);
+  expect(await expectCommittedSettlement(seed)).toEqual(report);
+
   const resonera = await browser.newPage({ viewport: { width: 390, height: 844 } });
   await resonera.goto(`http://127.0.0.1:${state.resoneraPort}/?projectId=${seed.projectId}`, { waitUntil: "domcontentloaded" });
   await expect(resonera.getByText(`Settlement Quest ${seed.key}`, { exact: true })).toBeVisible({ timeout: 45_000 });
@@ -26,6 +62,14 @@ test("one committed settlement becomes the same world fact in Kamiya and Resoner
   await resonera.getByLabel("Message Kamiya").fill(`settlement status ${seed.taskId}`);
   await resonera.getByLabel("Send").click();
   await expect(resonera.getByText("Encounter settled", { exact: true }).last()).toBeVisible({ timeout: 20_000 });
+
+  await resonera.getByLabel("Close").click();
+  await resonera.getByText("Home", { exact: true }).last().click();
+  await expect(resonera.getByText(`Settlement Quest ${seed.key}`, { exact: true })).toBeVisible();
+  await resonera.route("**/api/v1/projects/*/world-state**", route => route.abort("internetdisconnected"));
+  await resonera.reload({ waitUntil: "domcontentloaded" });
+  await expect(resonera.getByText("OFFLINE CHRONICLE", { exact: true })).toBeVisible({ timeout: 20_000 });
+  await expect(resonera.getByText(`Settlement Quest ${seed.key}`, { exact: true })).toBeVisible();
 
   expect(report).toMatchObject({ attemptCount: 1, completions: 1, rewards: 5, xp: 1, outboxDelivered: 4 });
   await resonera.screenshot({ path: `artifacts/golden-conversation/core-world-resonera-${seed.key}.png`, fullPage: true });

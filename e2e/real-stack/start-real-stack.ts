@@ -218,6 +218,7 @@ async function ensurePgBossSchema(): Promise<void> {
 async function seedActors(hashApiToken: (token: string) => string) {
   const actorA = makeActor("a");
   const actorB = makeActor("b");
+  const actorC = makeActor("c");
   const scopes = [
     "profile:read",
     "projects:read",
@@ -233,7 +234,7 @@ async function seedActors(hashApiToken: (token: string) => string) {
   ];
 
   await withE2EClient(async (client) => {
-    for (const actor of [actorA, actorB]) {
+    for (const actor of [actorA, actorB, actorC]) {
       const user = await client.query(
         `INSERT INTO users (auth0_id, username, email, roles, skills, interests)
          VALUES ($1, $2, $3, '{"user"}'::text[], '[]'::jsonb, '[]'::jsonb)
@@ -249,10 +250,10 @@ async function seedActors(hashApiToken: (token: string) => string) {
     }
   });
 
-  return { a: actorA, b: actorB };
+  return { a: actorA, b: actorB, c: actorC };
 }
 
-function makeActor(label: "a" | "b") {
+function makeActor(label: "a" | "b" | "c") {
   const suffix = runId.slice(-10);
   return {
     id: 0,
@@ -341,6 +342,7 @@ async function buildResoneraWeb(actors: Awaited<ReturnType<typeof seedActors>>):
       BABEL_ENV: "production",
       EXPO_PUBLIC_CERBANIMO_API_URL: `http://127.0.0.1:${ports.cerbanimoPort}/api/v1`,
       EXPO_PUBLIC_CERBANIMO_API_TOKEN: actors.a.token,
+      EXPO_PUBLIC_ALLOW_INSECURE_TEST_TOKEN: "true",
       EXPO_PUBLIC_KAMIYA_API_URL: `http://127.0.0.1:${ports.apiPort}`,
       EXPO_PUBLIC_WORLD_POLL_MS: "1000"
     }
