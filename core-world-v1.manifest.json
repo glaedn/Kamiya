@@ -13,12 +13,18 @@
   "componentCommits": {
     "cerbanimo": "403db08b4149a4093093afea2b803c211cc7283f",
     "kamiya": "11454202bfcc04879b451fde3422ffc74e6c7faa",
-    "resonera": "80d381b7ba0ec327aa0cabb9190c2e38b81b2696"
+    "resonera": "8b26e37b4813bde3c76648694f5ff8dda4a4c382"
   },
   "integrationTest": {
     "repository": "Kamiya",
     "command": "npm run test:e2e:core-world",
     "mode": "real local stack with deterministic external-provider fixtures"
+  },
+  "androidValidation": {
+    "repository": "Resonera",
+    "platform": "Android 14 API 34 x86_64 emulator",
+    "apkSha256": "BC31CFC51595B74808FB29672DEED098DC666906291EFD2EDC59AFA2A5F4E2E1",
+    "result": "clean prebuild, debug build, install, cold launch, rendered UI and fatal-log check passed"
   },
   "note": "Manifest commits are direct descendants of the component commits above; final branch heads are recorded by the linked draft pull requests."
 }
