@@ -1,4 +1,5 @@
 import { z } from "zod";
+import { checkCerbanimoContractIdentity } from "../../shared/cerbanimoContract";
 import type {
   ActionPreview,
   ActiveCerbanimoActionState,
@@ -24,7 +25,8 @@ import type {
   QuestProfileResponse,
   TaskEvidenceContext,
   TaskAutomationContext,
-  TaskReviewContext
+  TaskReviewContext,
+  TaskSettlementContext
 } from "../../shared/types";
 
 const apiEnvelopeSchema = z.object({
@@ -290,6 +292,84 @@ const reviewAllowedActionsSchema = z.object({
   seal: z.boolean().optional()
 }).partial().optional();
 
+const taskSettlementRewardSchema = z.object({
+  amount: z.coerce.number(),
+  tokenType: z.string(),
+  postedAt: z.string().optional().nullable()
+}).passthrough();
+
+const taskSettlementSchema = z.object({
+  settlementId: z.string().optional(),
+  settlementRecordId: z.union([z.number(), z.string()]).optional(),
+  status: z.string(),
+  attemptCount: z.number().optional(),
+  policyVersion: z.string().optional(),
+  task: z.object({
+    id: z.union([z.number(), z.string()]).optional(),
+    name: z.string().optional(),
+    status: z.string().optional(),
+    completedAt: z.string().optional().nullable()
+  }).optional(),
+  project: z.object({
+    id: z.union([z.number(), z.string()]).optional(),
+    name: z.string().optional(),
+    completed: z.boolean().optional(),
+    completedAt: z.string().optional().nullable(),
+    remainingRequiredTasks: z.number().optional()
+  }).optional(),
+  rewards: z.object({
+    contributor: z.array(taskSettlementRewardSchema).optional().default([]),
+    peerReviewers: z.array(taskSettlementRewardSchema).optional().default([]),
+    pmReviewer: z.array(taskSettlementRewardSchema).optional().default([])
+  }).optional(),
+  skillChanges: z.array(z.object({
+    skillId: z.union([z.number(), z.string()]),
+    xpDelta: z.number(),
+    previousXp: z.number(),
+    newXp: z.number(),
+    previousLevel: z.number(),
+    newLevel: z.number(),
+    levelChanged: z.boolean()
+  }).passthrough()).optional().default([]),
+  activatedTasks: z.array(z.object({
+    id: z.union([z.number(), z.string()]),
+    name: z.string().optional(),
+    status: z.string().optional()
+  }).passthrough()).optional().default([]),
+  storyEvent: z.object({ created: z.boolean().optional(), eventId: z.string().optional().nullable() }).optional(),
+  completionRecord: z.object({
+    id: z.union([z.number(), z.string()]).optional(),
+    uuid: z.string().optional(),
+    completedAt: z.string().optional().nullable()
+  }).optional().nullable(),
+  action: z.object({
+    id: z.union([z.number(), z.string()]),
+    uuid: z.string().optional().nullable(),
+    status: z.string().optional(),
+    preview: z.record(z.unknown()).optional().nullable()
+  }).optional().nullable(),
+  lastError: z.object({
+    code: z.string().optional(),
+    message: z.string().optional(),
+    retryable: z.boolean().optional(),
+    details: z.record(z.unknown()).optional()
+  }).optional().nullable(),
+  progress: z.object({
+    status: z.string().optional(),
+    stages: z.array(z.string()).optional().default([]),
+    eventCount: z.number().optional()
+  }).optional(),
+  effectSummary: z.record(z.number()).optional(),
+  copy: z.string().optional(),
+  allowedActions: z.object({
+    view: z.boolean().optional(),
+    confirm: z.boolean().optional(),
+    retry: z.boolean().optional(),
+    cancel: z.boolean().optional(),
+    reconcile: z.boolean().optional()
+  }).partial().optional()
+}).passthrough();
+
 const taskReviewRoundSchema = z.object({
   id: z.union([z.number(), z.string()]),
   round_uuid: z.string().optional().nullable(),
@@ -358,6 +438,7 @@ const taskReviewContextSchema = z.object({
   }).optional(),
   validation: z.record(z.unknown()).optional().nullable(),
   evidence: taskEvidenceContextSchema.optional().nullable(),
+  settlement: taskSettlementSchema.optional().nullable(),
   copy: z.string().optional(),
   allowedActions: reviewAllowedActionsSchema
 }).passthrough();
@@ -609,6 +690,28 @@ const automationRunSchema = z.object({
 
 const defaultRequestTimeoutMs = 15_000;
 
+export function normalizeCerbanimoApiUrl(
+  value: string | undefined,
+  options: { allowLoopback?: boolean; allowedOrigins?: string[] } = {}
+): string {
+  if (!value) return "";
+  let parsed: URL;
+  try {
+    parsed = new URL(value);
+  } catch {
+    return "";
+  }
+  if (!['http:', 'https:'].includes(parsed.protocol) || parsed.username || parsed.password) return "";
+  const hostname = parsed.hostname.toLowerCase();
+  const loopback = hostname === 'localhost' || hostname === '::1' || /^127(?:\.\d{1,3}){3}$/.test(hostname);
+  const allowedOrigins = new Set((options.allowedOrigins || []).flatMap(origin => {
+    try { return [new URL(origin).origin]; } catch { return []; }
+  }));
+  if (options.allowLoopback && loopback) return parsed.toString().replace(/\/$/, "");
+  if (parsed.protocol === 'https:' && allowedOrigins.has(parsed.origin)) return parsed.toString().replace(/\/$/, "");
+  return "";
+}
+
 export class CerbanimoClient {
   private readonly apiUrl: string;
   private readonly token?: string;
@@ -616,7 +719,18 @@ export class CerbanimoClient {
 
   constructor(auth: KamiyaAuthContext) {
     this.auth = auth;
-    this.apiUrl = process.env.KAMIYA_CERBANIMO_API_URL || auth.cerbanimoApiUrl || "";
+    const configuredApiUrl = process.env.KAMIYA_CERBANIMO_API_URL || "";
+    const configuredOrigin = (() => {
+      try { return configuredApiUrl ? new URL(configuredApiUrl).origin : ""; } catch { return ""; }
+    })();
+    const allowedOrigins = [
+      configuredOrigin,
+      ...(process.env.KAMIYA_CERBANIMO_ALLOWED_ORIGINS || "").split(',').map(value => value.trim())
+    ].filter(Boolean);
+    this.apiUrl = normalizeCerbanimoApiUrl(configuredApiUrl || auth.cerbanimoApiUrl, {
+      allowLoopback: process.env.NODE_ENV !== 'production',
+      allowedOrigins
+    });
     this.token = auth.cerbanimoToken || process.env.KAMIYA_CERBANIMO_BEARER_TOKEN;
   }
 
@@ -944,6 +1058,51 @@ export class CerbanimoClient {
     ) as Promise<CerbanimoResult<TaskReviewContext>>;
   }
 
+  async taskSettlement(taskId: string | number): Promise<CerbanimoResult<TaskSettlementContext>> {
+    return this.requestV1(
+      `/tasks/${encodeURIComponent(String(taskId))}/settlement`,
+      "GET",
+      undefined,
+      taskSettlementSchema
+    ) as Promise<CerbanimoResult<TaskSettlementContext>>;
+  }
+
+  async getSettlement(settlementId: string | number): Promise<CerbanimoResult<TaskSettlementContext>> {
+    return this.requestV1(
+      `/settlements/${encodeURIComponent(String(settlementId))}`,
+      "GET",
+      undefined,
+      taskSettlementSchema
+    ) as Promise<CerbanimoResult<TaskSettlementContext>>;
+  }
+
+  async previewTaskSettlement(taskId: string | number): Promise<CerbanimoResult<TaskSettlementContext>> {
+    return this.requestV1(
+      `/tasks/${encodeURIComponent(String(taskId))}/settlement/preview`,
+      "POST",
+      { sourceClient: "kamiya-web" },
+      taskSettlementSchema
+    ) as Promise<CerbanimoResult<TaskSettlementContext>>;
+  }
+
+  async retrySettlement(settlementId: string | number): Promise<CerbanimoResult<TaskSettlementContext>> {
+    return this.requestV1(
+      `/settlements/${encodeURIComponent(String(settlementId))}/retry`,
+      "POST",
+      {},
+      taskSettlementSchema
+    ) as Promise<CerbanimoResult<TaskSettlementContext>>;
+  }
+
+  async cancelSettlement(settlementId: string | number, reason = "Cancelled from Kamiya."): Promise<CerbanimoResult<TaskSettlementContext>> {
+    return this.requestV1(
+      `/settlements/${encodeURIComponent(String(settlementId))}/cancel`,
+      "POST",
+      { reason },
+      taskSettlementSchema
+    ) as Promise<CerbanimoResult<TaskSettlementContext>>;
+  }
+
   async getAutomationRun(runId: string | number): Promise<CerbanimoResult<AutomationRun>> {
     return this.requestV1(
       `/automation/runs/${encodeURIComponent(String(runId))}`,
@@ -1154,6 +1313,23 @@ export class CerbanimoClient {
           : { ok: true, data: { action: confirmed.data, automationRunError: run.error }, requestId: confirmed.requestId };
       }
       return this.request("/automation/actions", "POST", action.payload);
+    }
+
+    if (action.kind === "settle_task") {
+      const actionId = action.cerbanimoActionUuid ?? action.cerbanimoActionId;
+      const settlementId = action.payload.settlementId;
+      if (!actionId || (typeof settlementId !== "string" && typeof settlementId !== "number")) {
+        return {
+          ok: false,
+          error: "Kamiya cannot confirm this settlement because Cerbanimo did not return both the durable action and settlement identifiers."
+        };
+      }
+      const confirmed = await this.confirmAction(actionId);
+      if (!confirmed.ok) return confirmed;
+      const settlement = await this.getSettlement(settlementId);
+      return settlement.ok
+        ? { ok: true, data: { action: confirmed.data, settlement: settlement.data }, requestId: settlement.requestId ?? confirmed.requestId }
+        : settlement;
     }
 
     if (action.kind === "game_master") {
@@ -1402,14 +1578,20 @@ export class CerbanimoClient {
 
     const normalizedPath = path.startsWith("/") ? path : `/${path}`;
     const v1Path = normalizedPath.startsWith("/api/v1/") ? normalizedPath : `/api/v1${normalizedPath}`;
-    return this.requestRaw(`${this.apiUrl}${v1Path}`, method, body, schema);
+    return this.requestRaw(`${this.apiUrl}${v1Path}`, method, body, schema, true);
   }
 
   private async request(path: string, method: string, body?: unknown): Promise<CerbanimoResult> {
     return this.requestRaw(`${this.apiUrl}${path}`, method, body);
   }
 
-  private async requestRaw<T>(url: string, method: string, body?: unknown, schema?: z.ZodType<T>): Promise<CerbanimoResult<T>> {
+  private async requestRaw<T>(
+    url: string,
+    method: string,
+    body?: unknown,
+    schema?: z.ZodType<T>,
+    requireContractIdentity = false
+  ): Promise<CerbanimoResult<T>> {
     const controller = new AbortController();
     const timeout = setTimeout(() => controller.abort(), Number(process.env.KAMIYA_CERBANIMO_TIMEOUT_MS ?? defaultRequestTimeoutMs));
 
@@ -1434,6 +1616,23 @@ export class CerbanimoClient {
       };
     } finally {
       clearTimeout(timeout);
+    }
+
+    if (requireContractIdentity) {
+      const compatibility = checkCerbanimoContractIdentity(
+        response.headers?.get("x-cerbanimo-contract-version"),
+        response.headers?.get("x-cerbanimo-contract-digest")
+      );
+      if (!compatibility.compatible) {
+        return {
+          ok: false,
+          error: compatibility.reason,
+          code: "CONTRACT_INCOMPATIBLE",
+          status: response.status,
+          requestId: response.headers?.get("x-request-id") ?? undefined,
+          retryable: false
+        };
+      }
     }
 
     const data = await response.json().catch(() => undefined);

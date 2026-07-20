@@ -1,5 +1,7 @@
 # Current Architecture
 
+> 2026-07-17 integration update: the current branch now includes Cerbanimo evidence bundles, validation/review cards, replay-safe completion settlement cards, an accessible guided turn-in/reviewer desk, and a generated contract snapshot. Cerbanimo remains authoritative; Resonera is the supported game/mobile renderer. The older evidence basis below remains a historical audit trail where not superseded by [core-world-integration.md](../core-world-integration.md).
+
 Evidence basis: Kamiya branch `kamiya/m3-task-automation-classification`; Cerbanimo branch `kamiya/m2-task-automation-classification`. This file describes current repository behavior, not intended future behavior unless labeled as such.
 
 ## 1. System Context

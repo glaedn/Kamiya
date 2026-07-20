@@ -4,6 +4,7 @@ import path from "node:path";
 const webPort = Number(process.env.KAMIYA_REAL_STACK_WEB_PORT ?? 5179);
 const apiPort = Number(process.env.KAMIYA_REAL_STACK_API_PORT ?? 4181);
 const cerbanimoPort = Number(process.env.KAMIYA_REAL_STACK_CERBANIMO_PORT ?? 4401);
+const resoneraPort = Number(process.env.KAMIYA_REAL_STACK_RESONERA_PORT ?? 3011);
 const baseURL = process.env.KAMIYA_REAL_STACK_BASE_URL ?? `http://127.0.0.1:${webPort}`;
 const stateFile = process.env.KAMIYA_REAL_STACK_STATE_FILE ?? path.resolve("node_modules/.cache/kamiya-real-stack/state.json");
 
@@ -37,6 +38,8 @@ export default defineConfig({
           String(apiPort),
           "--cerbanimo-port",
           String(cerbanimoPort),
+          "--resonera-port",
+          String(resoneraPort),
           "--state-file",
           stateFile
         ].join(" "),
@@ -48,6 +51,10 @@ export default defineConfig({
     {
       name: "chromium",
       use: { ...devices["Desktop Chrome"], viewport: { width: 1280, height: 800 } }
+    },
+    {
+      name: "mobile-chromium",
+      use: { ...devices["Pixel 5"], viewport: { width: 390, height: 844 } }
     }
   ],
   outputDir: "test-results-real-stack"

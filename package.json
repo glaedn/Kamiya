@@ -19,11 +19,19 @@
     "lint": "eslint .",
     "test:e2e": "npm run test:e2e:contract && npm run test:e2e:integration && npm run test:e2e:failure",
     "test:e2e:contract": "playwright test e2e/golden-conversation.contract.spec.ts",
-    "test:e2e:integration": "playwright test -c playwright.real-stack.config.ts e2e/golden-conversation.integration.spec.ts",
-    "test:e2e:failure": "playwright test -c playwright.real-stack.config.ts e2e/golden-conversation.failure.spec.ts",
+    "test:e2e:integration": "playwright test -c playwright.real-stack.config.ts e2e/golden-conversation.integration.spec.ts --project=chromium",
+    "test:e2e:failure": "playwright test -c playwright.real-stack.config.ts e2e/golden-conversation.failure.spec.ts --project=chromium",
     "test:e2e:headed": "playwright test -c playwright.real-stack.config.ts e2e/golden-conversation.integration.spec.ts --headed --project=chromium --grep=\"golden conversation\"",
+    "test:e2e:settlement": "playwright test e2e/settlement.contract.spec.ts --project=chromium",
+    "test:e2e:settlement:mobile": "playwright test e2e/settlement.contract.spec.ts --project=mobile-chromium",
+    "test:e2e:settlement:real": "playwright test -c playwright.real-stack.config.ts e2e/settlement.integration.spec.ts",
+    "test:e2e:core-world": "playwright test -c playwright.real-stack.config.ts e2e/core-world.integration.spec.ts --project=chromium",
+    "test:e2e:party-quest": "playwright test -c playwright.real-stack.config.ts e2e/party-quest.integration.spec.ts --project=chromium",
     "test:e2e:debug": "playwright test --debug",
-    "test:e2e:report": "playwright show-report"
+    "test:e2e:report": "playwright show-report",
+    "contract:verify": "node scripts/verify-cerbanimo-contract.mjs",
+    "guard:generated": "node scripts/check-generated-twins.mjs",
+    "verify": "npm run guard:generated && npm run contract:verify && npm run build && npm run lint && npm run test"
   },
   "dependencies": {
     "@vitejs/plugin-react": "^5.0.0",

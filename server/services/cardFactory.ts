@@ -9,7 +9,8 @@ import type {
   ResponseCard,
   TaskEvidenceContext,
   TaskAutomationContext,
-  TaskReviewContext
+  TaskReviewContext,
+  TaskSettlementContext
 } from "../../shared/types";
 import { agentModes } from "./modeService";
 
@@ -357,6 +358,152 @@ export function reviewStatusCard(context: TaskReviewContext): ResponseCard {
       }
     ]
   };
+}
+
+export function settlementCard(settlement: TaskSettlementContext, options: { plain?: boolean } = {}): ResponseCard {
+  const status = String(settlement.status || "pending");
+  const completed = status === "completed";
+  const failed = ["blocked", "failed", "retry_wait", "cancelled"].includes(status);
+  const taskId = String(settlement.task?.id ?? "");
+  const projectId = String(settlement.project?.id ?? "");
+  const settlementId = String(settlement.settlementId ?? settlement.settlementRecordId ?? "");
+  const rewards = settlement.rewards ?? {};
+  const contributorRewards = rewards.contributor ?? [];
+  const peerRewards = rewards.peerReviewers ?? [];
+  const pmRewards = rewards.pmReviewer ?? [];
+  const rewardCount = contributorRewards.length + peerRewards.length + pmRewards.length;
+  const stages = settlement.progress?.stages ?? [];
+  const body = options.plain
+    ? plainSettlementCopy(settlement)
+    : gameMasterSettlementCopy(settlement);
+
+  return {
+    id: `settlement-${settlementId || taskId || crypto.randomUUID()}`,
+    kind: completed ? "settlement_complete" : failed ? "settlement_failure" : "settlement_progress",
+    title: completed ? "Encounter settled" : failed ? "Settlement needs attention" : "Applying accepted consequences",
+    subtitle: humanSettlementStatus(status),
+    body,
+    metadata: compactMetadata({
+      settlementId,
+      taskId,
+      projectId,
+      attempt: settlement.attemptCount ?? 0,
+      completedAt: settlement.task?.completedAt ?? "",
+      contributorRewards: completed ? contributorRewards.length : "",
+      countedPeerRewards: completed ? peerRewards.length : "",
+      countedPmRewards: completed ? pmRewards.length : "",
+      activatedTasks: completed ? settlement.activatedTasks?.length ?? 0 : "",
+      remainingProjectTasks: completed ? settlement.project?.remainingRequiredTasks ?? 0 : "",
+      errorCode: failed ? settlement.lastError?.code ?? status : "",
+      retryable: failed ? Boolean(settlement.allowedActions?.retry) : ""
+    }),
+    items: completed
+      ? settlementResultItems(settlement, rewardCount)
+      : failed
+        ? [{
+            id: "failure",
+            title: "Review remains accepted",
+            subtitle: settlement.lastError?.message ?? settlement.copy ?? "Cerbanimo did not commit completion consequences.",
+            status: settlement.lastError?.retryable ? "retry available" : "blocked"
+          }]
+        : stages.map((stage) => ({
+            id: stage,
+            title: stage,
+            status: status === "running" && stage === stages[0] ? "worker active" : "pending"
+          })),
+    actions: [
+      ...(settlement.allowedActions?.confirm && settlement.action?.status === "previewed" ? [{ id: "confirm", label: "Confirm settlement", style: "primary" as const, actionId: String(settlement.action.uuid ?? settlement.action.id) }] : []),
+      ...(!completed && !failed && taskId ? [{ id: "refresh-settlement", label: "Refresh status", style: "secondary" as const, command: `settlement status ${taskId}` }] : []),
+      ...(settlement.allowedActions?.retry && settlementId ? [{ id: "retry-settlement", label: "Retry settlement", style: "primary" as const, command: `retry settlement ${settlementId}` }] : []),
+      ...(settlement.allowedActions?.cancel && settlementId ? [{ id: "cancel-settlement", label: "Cancel settlement", style: "secondary" as const, command: `cancel settlement ${settlementId}` }] : []),
+      ...(completed && taskId ? [{ id: "view-completed-task", label: "View completed task", style: "primary" as const, command: `/open /tasks/${taskId}` }] : []),
+      ...(completed && (settlement.activatedTasks?.length ?? 0) > 0 ? [{ id: "explore-unlocked", label: "Explore unlocked tasks", style: "secondary" as const, command: `explore settlement tasks ${settlementId}` }] : []),
+      ...(completed && projectId ? [{ id: "open-ledger", label: "Open Quest Ledger", style: "secondary" as const, command: `/open /projects/${projectId}` }] : []),
+      ...(completed && projectId && settlement.storyEvent?.created ? [{ id: "view-chronicle", label: "View Chronicle", style: "secondary" as const, command: `show chronicle ${projectId}` }] : [])
+    ]
+  };
+}
+
+function settlementResultItems(settlement: TaskSettlementContext, rewardCount: number): NonNullable<ResponseCard["items"]> {
+  const items: NonNullable<ResponseCard["items"]> = [
+    {
+      id: "completion",
+      title: settlement.task?.name ?? "Completed task",
+      subtitle: settlement.task?.completedAt ?? settlement.completionRecord?.completedAt ?? "Completion committed",
+      status: "completed"
+    }
+  ];
+  if (rewardCount > 0) {
+    items.push({
+      id: "rewards",
+      title: "Ledger rewards",
+      subtitle: `${settlement.rewards?.contributor?.length ?? 0} contributor, ${settlement.rewards?.peerReviewers?.length ?? 0} counted peer, ${settlement.rewards?.pmReviewer?.length ?? 0} counted PM reward event(s)`,
+      status: "posted"
+    });
+  }
+  for (const change of settlement.skillChanges ?? []) {
+    items.push({
+      id: `skill-${change.skillId}`,
+      title: `Skill ${change.skillId}`,
+      subtitle: `${change.xpDelta} XP | ${change.previousXp} to ${change.newXp}`,
+      status: change.levelChanged ? `level ${change.previousLevel} to ${change.newLevel}` : `level ${change.newLevel}`
+    });
+  }
+  for (const task of settlement.activatedTasks ?? []) {
+    items.push({
+      id: `activated-${task.id}`,
+      title: task.name ?? `Task ${task.id}`,
+      subtitle: "All prerequisites are complete.",
+      status: task.status ?? "active"
+    });
+  }
+  items.push({
+    id: "project",
+    title: settlement.project?.name ?? "Project",
+    subtitle: settlement.project?.completed
+      ? "Every required task is complete."
+      : `${settlement.project?.remainingRequiredTasks ?? 0} required task(s) remain.`,
+    status: settlement.project?.completed ? "completed" : "in progress"
+  });
+  return items;
+}
+
+function gameMasterSettlementCopy(settlement: TaskSettlementContext): string {
+  if (settlement.status !== "completed") {
+    if (["blocked", "failed", "retry_wait"].includes(String(settlement.status))) return "The judgment still stands, but Cerbanimo could not safely apply the consequences yet.";
+    if (settlement.status === "cancelled") return "The judgment still stands, but its consequences were not written before the settlement was cancelled.";
+    return "The review is accepted. Cerbanimo is applying completion, rewards, progression, and newly unlocked work.";
+  }
+  const lines = ["The encounter is complete."];
+  const opened = settlement.activatedTasks?.length ?? 0;
+  if (opened > 0) lines.push(`${opened} sealed path${opened === 1 ? " has" : "s have"} opened.`);
+  for (const change of settlement.skillChanges ?? []) {
+    if (change.levelChanged) lines.push(`A calling advanced from level ${change.previousLevel} to level ${change.newLevel}.`);
+  }
+  const rewardCount = (settlement.rewards?.contributor?.length ?? 0) + (settlement.rewards?.peerReviewers?.length ?? 0) + (settlement.rewards?.pmReviewer?.length ?? 0);
+  if (rewardCount > 0) lines.push("The party ledger records the configured rewards.");
+  if (settlement.project?.completed) lines.push("Every required encounter is complete; the Quest Chronicle is ready for its epilogue.");
+  return lines.join(" ");
+}
+
+function plainSettlementCopy(settlement: TaskSettlementContext): string {
+  if (settlement.status !== "completed") return `Out of character: settlement status is ${settlement.status}. ${settlement.lastError?.message ?? "No completion consequences have been committed."}`;
+  const rewardCount = (settlement.rewards?.contributor?.length ?? 0) + (settlement.rewards?.peerReviewers?.length ?? 0) + (settlement.rewards?.pmReviewer?.length ?? 0);
+  return `Out of character: task ${settlement.task?.id ?? ""} completed at ${settlement.task?.completedAt ?? "the recorded completion time"}; ${rewardCount} reward event(s), ${settlement.skillChanges?.length ?? 0} skill XP event(s), and ${settlement.activatedTasks?.length ?? 0} dependent activation(s) committed. Project completion: ${settlement.project?.completed ? "yes" : "no"}.`;
+}
+
+function humanSettlementStatus(status: string): string {
+  const labels: Record<string, string> = {
+    pending: "Awaiting confirmation",
+    queued: "Queued",
+    running: "In progress",
+    retry_wait: "Waiting to retry",
+    completed: "Committed",
+    blocked: "Blocked safely",
+    failed: "Failed before commit",
+    cancelled: "Cancelled before commit"
+  };
+  return labels[status] ?? status;
 }
 
 export function reviewAssignmentsCard(context: TaskReviewContext): ResponseCard {

@@ -14,11 +14,14 @@ export async function routeIntent(request: ChatTurnRequest): Promise<RoutedInten
   return normalizeIntent(routed ?? routeIntentLocally(request.message));
 }
 
-function normalizeIntent(intent: RoutedIntent): RoutedIntent {
+export function normalizeIntent(intent: RoutedIntent): RoutedIntent {
   return {
     ...intent,
     confidence: Math.max(0, Math.min(1, intent.confidence)),
     required_inputs: intent.required_inputs ?? [],
-    entities: intent.entities ?? {}
+    entities: intent.entities ?? {},
+    // The model identifies the domain well but can still ask for inputs that a
+    // read-only stats request does not need. Application logic owns statistics.
+    next_action: intent.intent === "statistics" ? "show_stats" : intent.next_action
   };
 }

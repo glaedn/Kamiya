@@ -16,6 +16,20 @@ const democraticEconomyFixture = {
 
 export async function analyzePlanning(message: string, currentDraft?: PlanningDraft): Promise<PlanningAnalysis> {
   const serverNow = serverNowForPlanning();
+  if (isCollaborativePlanningKickoff(message, currentDraft)) {
+    return {
+      reasoning: "The user asked to plan collaboratively but has not supplied the project itself yet.",
+      fulfilled_fields: [],
+      missing_fields: requiredFields.map((field) => ({
+        field,
+        status: "missing" as const,
+        question: questionForField(field)
+      })),
+      recommended_next_questions: ["What are we hoping to accomplish together?"],
+      draft: {},
+      ready_to_create: false
+    };
+  }
   const localAnalysis = analyzePlanningLocally(message, currentDraft, serverNow);
   const aiAnalysis = await generateGeminiJson<PlanningAnalysis>({
     prompt: buildPlanningPrompt(message, currentDraft, serverNow),
@@ -29,6 +43,21 @@ export async function analyzePlanning(message: string, currentDraft?: PlanningDr
     draft: mergeDrafts(localAnalysis.draft, aiAnalysis.draft),
     fulfilled_fields: [...localAnalysis.fulfilled_fields, ...(aiAnalysis.fulfilled_fields ?? [])]
   });
+}
+
+function isCollaborativePlanningKickoff(message: string, currentDraft?: PlanningDraft): boolean {
+  if (currentDraft && Object.keys(currentDraft).length > 0) return false;
+  const normalized = message
+    .toLowerCase()
+    .replace(/[?!.,]/g, " ")
+    .replace(/\s+/g, " ")
+    .trim();
+  const asksForPlanningHelp =
+    /\b(help|work with me|together|collaborate|can we|let'?s)\b/.test(normalized) &&
+    /\b(plan|planning|project plan|roadmap)\b/.test(normalized);
+  if (!asksForPlanningHelp) return false;
+
+  return !/\b(for|to build|to create|about|around)\s+(?!a plan\b|the plan\b|this plan\b).{4,}/.test(normalized);
 }
 
 function serverNowForPlanning(): Date {

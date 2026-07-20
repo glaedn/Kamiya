@@ -2,6 +2,14 @@ import { describe, expect, it } from "vitest";
 import { analyzePlanning } from "./planningService";
 
 describe("analyzePlanning", () => {
+  it("opens a collaborative planning conversation without turning the request itself into a project", async () => {
+    const analysis = await analyzePlanning("Kamiya, can you help me build a plan together?");
+
+    expect(analysis.draft).toEqual({});
+    expect(analysis.ready_to_create).toBe(false);
+    expect(analysis.recommended_next_questions).toEqual(["What are we hoping to accomplish together?"]);
+  });
+
   it("derives a useful draft from a short project idea without Gemini", async () => {
     const analysis = await analyzePlanning("/plan Launch a neighborhood repair cafe");
 

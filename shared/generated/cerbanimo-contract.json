@@ -1,0 +1,16 @@
+{
+  "contractVersion": "1.0.0",
+  "digest": "sha256:a9c1c50e5c5af8304e750ca326d72b89136f1a9356456499bff5583f78bba55b",
+  "schemas": [
+    "CanonicalTask",
+    "TaskAutomation",
+    "EvidenceItem",
+    "EvidenceBundle",
+    "ValidationResult",
+    "ReviewRound",
+    "AcceptanceSettlement",
+    "DomainEventEnvelope",
+    "CommandActionPreview",
+    "KamiyaStructuredResponse"
+  ]
+}

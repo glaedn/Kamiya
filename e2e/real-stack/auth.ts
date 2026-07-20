@@ -4,7 +4,7 @@ import { readRealStackState, type RealStackActor } from "./state";
 export async function seedRealStackAuth(page: Page, input: {
   scenario: string;
   runId: string;
-  actor?: "a" | "b";
+  actor?: "a" | "b" | "c";
   activeAction?: Record<string, unknown>;
 }): Promise<void> {
   const state = readRealStackState();
@@ -54,6 +54,21 @@ export function bearerHeaders(actor: RealStackActor): Record<string, string> {
     authorization: `Bearer ${actor.token}`,
     "content-type": "application/json"
   };
+}
+
+export async function seedResoneraAuth(page: Page, actor: RealStackActor): Promise<void> {
+  await page.addInitScript(({ actor }) => {
+    sessionStorage.setItem("resonera_cerbanimo_session", JSON.stringify({
+      tokenType: "Bearer",
+      accessToken: actor.token,
+      expiresAt: Date.now() + 60 * 60 * 1000,
+      user: {
+        sub: actor.auth0Id,
+        name: actor.displayName,
+        email: actor.email
+      }
+    }));
+  }, { actor });
 }
 
 function publicStateForBrowser(state: ReturnType<typeof readRealStackState>) {

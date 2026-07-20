@@ -1,6 +1,7 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
 import type { ActionPreview } from "../../shared/types";
-import { CerbanimoClient } from "./cerbanimoClient";
+import { CERBANIMO_CONTRACT_DIGEST, CERBANIMO_CONTRACT_VERSION } from "../../shared/cerbanimoContract";
+import { CerbanimoClient, normalizeCerbanimoApiUrl } from "./cerbanimoClient";
 
 const auth = {
   isLoggedIn: true,
@@ -258,6 +259,65 @@ describe("CerbanimoClient /api/v1 action contract", () => {
     expect(fetchMock.mock.calls[1][0]).toBe("http://localhost:4000/api/v1/review-rounds/round-701/pm-decisions");
   });
 
+  it("rejects a stale server contract before parsing its payload", async () => {
+    vi.stubGlobal("fetch", vi.fn().mockResolvedValue(jsonResponse(
+      { ok: true, data: { actions: [] }, error: null },
+      200,
+      { digest: "sha256:stale" }
+    )));
+
+    const result = await new CerbanimoClient(auth).listActions();
+
+    expect(result).toMatchObject({ ok: false, code: "CONTRACT_INCOMPATIBLE", retryable: false });
+  });
+
+  it("hydrates canonical settlement facts without requiring raw ledger internals", async () => {
+    const fetchMock = mockFetch({
+      ok: true,
+      data: settlementContext(),
+      error: null,
+      requestId: "req-settlement"
+    });
+
+    const result = await new CerbanimoClient(auth).taskSettlement(203);
+
+    expect(result.ok).toBe(true);
+    expect(result.data?.status).toBe("completed");
+    expect(result.data?.activatedTasks).toEqual([{ id: 204, name: "Deploy pilot", status: "active-unassigned" }]);
+    expect(result.data?.rewards?.peerReviewers).toHaveLength(3);
+    expect(JSON.stringify(result.data)).not.toContain("previous_balance");
+    expect(JSON.stringify(result.data)).not.toContain("reviewer_user_id");
+    expect(fetchMock.mock.calls[0][0]).toBe("http://localhost:4000/api/v1/tasks/203/settlement");
+  });
+
+  it("confirms a manual settlement action then hydrates the settlement", async () => {
+    const fetchMock = vi
+      .fn()
+      .mockResolvedValueOnce(jsonResponse({ ok: true, data: actionRow({ id: 111, action_uuid: "settlement-action-111", status: "confirmed" }), error: null, requestId: "req-confirm" }, 202))
+      .mockResolvedValueOnce(jsonResponse({ ok: true, data: settlementContext({ status: "queued", task: { id: 203, name: "Accepted task", status: "submitted" } }), error: null, requestId: "req-settlement" }));
+    vi.stubGlobal("fetch", fetchMock);
+
+    const result = await new CerbanimoClient(auth).executeAction({
+      id: "local-settlement",
+      kind: "settle_task",
+      title: "Complete accepted task",
+      summary: "Apply completion consequences once.",
+      risk: "high",
+      destructive: false,
+      payload: { settlementId: "settlement-901", taskId: 203 },
+      requiredPermissions: ["tasks:write", "actions:write"],
+      createdAt: "2026-07-12T12:00:00.000Z",
+      cerbanimoActionUuid: "settlement-action-111"
+    });
+
+    expect(result.ok).toBe(true);
+    expect((result.data as { settlement?: { status?: string } }).settlement?.status).toBe("queued");
+    expect(fetchMock.mock.calls.map((call) => String(call[0]))).toEqual([
+      "http://localhost:4000/api/v1/actions/settlement-action-111/confirm",
+      "http://localhost:4000/api/v1/settlements/settlement-901"
+    ]);
+  });
+
   it("confirms evidence submissions through actions instead of legacy submit routes", async () => {
     const fetchMock = vi
       .fn()
@@ -434,6 +494,19 @@ describe("CerbanimoClient /api/v1 action contract", () => {
     expect(redeemed.data?.calling?.roleArchetype).toBe("party_member");
     expect(fetchMock.mock.calls[0][0]).toBe("http://localhost:4000/api/v1/projects/100/invites");
     expect(fetchMock.mock.calls[1][0]).toBe("http://localhost:4000/api/v1/project-invites/raw-token/redeem");
+  });
+});
+
+describe("Cerbanimo API destination policy", () => {
+  it("allows loopback only when explicitly in development mode", () => {
+    expect(normalizeCerbanimoApiUrl("http://127.0.0.1:4000", { allowLoopback: true })).toBe("http://127.0.0.1:4000");
+    expect(normalizeCerbanimoApiUrl("http://127.0.0.1:4000", { allowLoopback: false })).toBe("");
+  });
+
+  it("requires an allowlisted HTTPS origin for remote token forwarding", () => {
+    expect(normalizeCerbanimoApiUrl("https://cerbanimo.example/api", { allowedOrigins: ["https://cerbanimo.example"] })).toBe("https://cerbanimo.example/api");
+    expect(normalizeCerbanimoApiUrl("https://attacker.example/collect", { allowedOrigins: ["https://cerbanimo.example"] })).toBe("");
+    expect(normalizeCerbanimoApiUrl("javascript:alert(1)", { allowedOrigins: ["https://cerbanimo.example"] })).toBe("");
   });
 });
 
@@ -637,6 +710,32 @@ function evidenceValidationRunRow() {
   };
 }
 
+function settlementContext(overrides: Record<string, unknown> = {}) {
+  return {
+    settlementId: "settlement-901",
+    settlementRecordId: 901,
+    status: "completed",
+    attemptCount: 1,
+    policyVersion: "task-settlement-v1",
+    task: { id: 203, name: "Accepted task", status: "completed", completedAt: "2026-07-12T12:00:00.000Z" },
+    project: { id: 100, name: "Quest", completed: false, remainingRequiredTasks: 2 },
+    rewards: {
+      contributor: [{ amount: 20, tokenType: "project", postedAt: "2026-07-12T12:00:00.000Z" }],
+      peerReviewers: Array.from({ length: 3 }, () => ({ amount: 5, tokenType: "cotoken", postedAt: "2026-07-12T12:00:00.000Z" })),
+      pmReviewer: [{ amount: 6, tokenType: "project_or_community", postedAt: "2026-07-12T12:00:00.000Z" }]
+    },
+    skillChanges: [{ skillId: 5, xpDelta: 20, previousXp: 20, newXp: 40, previousLevel: 1, newLevel: 2, levelChanged: true }],
+    activatedTasks: [{ id: 204, name: "Deploy pilot", status: "active-unassigned" }],
+    storyEvent: { created: true, eventId: "story-1" },
+    completionRecord: { id: 1001, uuid: "completion-1", completedAt: "2026-07-12T12:00:00.000Z" },
+    effectSummary: { applied: 10, skipped: 1 },
+    progress: { status: "completed", stages: [], eventCount: 9 },
+    allowedActions: { view: true, retry: false, cancel: false, reconcile: false },
+    copy: "The accepted task is complete.",
+    ...overrides
+  };
+}
+
 function questContext() {
   return {
     project: { id: 100, name: "Be The Bag", description: "Create a durable mutual aid tote project." },
@@ -675,12 +774,24 @@ function mockFetch(body: unknown, status = 200) {
   return fetchMock;
 }
 
-function jsonResponse(body: unknown, status = 200) {
+function jsonResponse(
+  body: unknown,
+  status = 200,
+  contract: { version?: string; digest?: string } = {}
+) {
   return {
     ok: status < 400,
     status,
     statusText: status < 400 ? "OK" : "Bad Request",
-    headers: new Headers({ "x-request-id": (body as { requestId?: string }).requestId ?? "req-test" }),
+    headers: contractHeaders((body as { requestId?: string }).requestId ?? "req-test", contract),
     json: async () => body
   };
+}
+
+function contractHeaders(requestId: string, contract: { version?: string; digest?: string } = {}) {
+  return new Headers({
+    "x-request-id": requestId,
+    "x-cerbanimo-contract-version": contract.version ?? CERBANIMO_CONTRACT_VERSION,
+    "x-cerbanimo-contract-digest": contract.digest ?? CERBANIMO_CONTRACT_DIGEST
+  });
 }

@@ -1,4 +1,5 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
+import { CERBANIMO_CONTRACT_DIGEST, CERBANIMO_CONTRACT_VERSION } from "../../shared/cerbanimoContract";
 import { handleChatTurn } from "./chatService";
 
 describe("handleChatTurn", () => {
@@ -154,7 +155,7 @@ describe("handleChatTurn", () => {
       .fn()
       .mockResolvedValueOnce({
         ok: true,
-        headers: new Headers({ "x-request-id": "req-preview" }),
+        headers: contractHeaders("req-preview"),
         json: async () => ({
           ok: true,
           data: actionRow("previewed"),
@@ -165,12 +166,12 @@ describe("handleChatTurn", () => {
       .mockResolvedValueOnce({
         ok: true,
         status: 202,
-        headers: new Headers({ "x-request-id": "req-confirm" }),
+        headers: contractHeaders("req-confirm"),
         json: async () => ({ ok: true, data: actionRow("confirmed"), error: null, requestId: "req-confirm" })
       })
       .mockResolvedValueOnce({
         ok: true,
-        headers: new Headers({ "x-request-id": "req-detail" }),
+        headers: contractHeaders("req-detail"),
         json: async () => ({ ok: true, data: completedDetail(), error: null, requestId: "req-detail" })
       });
     vi.stubGlobal("fetch", fetchMock);
@@ -396,12 +397,12 @@ describe("handleChatTurn", () => {
     ]);
   });
 
-  it("accepts, Blesses, and seals review assignments with settlement-pending copy", async () => {
+  it("accepts, Blesses, and seals review assignments into truthful settlement copy", async () => {
     const fetchMock = vi
       .fn()
       .mockResolvedValueOnce(jsonResponse({ ok: true, data: reviewContext({ assignmentStatus: "accepted", allowedActions: { bless: true, requestChanges: true, reject: true, recuse: true } }), error: null, requestId: "req-accept" }))
       .mockResolvedValueOnce(jsonResponse({ ok: true, data: reviewContext({ peerReceived: 3, status: "pm_review_open" }), error: null, requestId: "req-bless" }))
-      .mockResolvedValueOnce(jsonResponse({ ok: true, data: reviewContext({ peerReceived: 3, status: "accepted_pending_settlement", settlement: "pending", copy: "The contribution has passed validation, peer review, and project review. Completion settlement is still pending." }), error: null, requestId: "req-seal" }));
+      .mockResolvedValueOnce(jsonResponse({ ok: true, data: reviewContext({ peerReceived: 3, status: "accepted_pending_settlement", settlement: "settled", settlementData: settlementContext(), copy: "The contribution has passed validation, peer review, and project review." }), error: null, requestId: "req-seal" }));
     vi.stubGlobal("fetch", fetchMock);
 
     const accepted = await handleChatTurn({ message: "accept review assignment-801", history: [], session: {}, auth: cerbanimoAuth(), channel: "sdk" });
@@ -410,8 +411,111 @@ describe("handleChatTurn", () => {
 
     expect(accepted.message.content).toContain("accepted");
     expect(blessed.message.content).toContain("Blessing recorded");
-    expect(sealed.message.content).toContain("accepted pending settlement");
-    expect(JSON.stringify(sealed.message.cards)).toContain("Completion settlement is still pending");
+    expect(sealed.message.content).toContain("committed the accepted task");
+    expect(JSON.stringify(sealed.message.cards)).toContain("Encounter settled");
+    expect(JSON.stringify(sealed.message.cards)).toContain("Deploy pilot");
+  });
+
+  it("starts co-planning with a focused question instead of naming the request as the project", async () => {
+    const response = await handleChatTurn({
+      message: "Kamiya, can you help me build a plan together?",
+      history: [],
+      session: {},
+      auth: {
+        isLoggedIn: true,
+        displayName: "Glaed",
+        permissions: ["projects:create"]
+      }
+    });
+
+    expect(response.message.content).toContain("What are we hoping to accomplish together?");
+    expect(response.session.planningDraft).toEqual({});
+    expect(response.session.pendingAction).toBeUndefined();
+  });
+
+  it("shows pending settlement progress without claiming completion or rewards", async () => {
+    process.env.KAMIYA_SETTLEMENT_POLL_MS = "0";
+    vi.stubGlobal("fetch", vi.fn().mockResolvedValueOnce(jsonResponse({
+      ok: true,
+      data: settlementContext({
+        status: "queued",
+        task: { id: 203, name: "Accepted task", status: "submitted", completedAt: null },
+        rewards: { contributor: [], peerReviewers: [], pmReviewer: [] },
+        skillChanges: [],
+        activatedTasks: [],
+        storyEvent: { created: false, eventId: null },
+        completionRecord: null,
+        allowedActions: { view: true, cancel: true, retry: false, reconcile: false },
+        copy: "The review is accepted. Cerbanimo is applying completion consequences."
+      }),
+      error: null,
+      requestId: "req-settlement"
+    })));
+
+    const response = await handleChatTurn({ message: "settlement status 203", history: [], session: {}, auth: cerbanimoAuth(), channel: "sdk" });
+
+    expect(response.message.content).toContain("applying completion");
+    expect(response.message.cards?.[0].kind).toBe("settlement_progress");
+    expect(JSON.stringify(response.message.cards)).not.toContain("ledger records the configured rewards");
+    expect(response.session.currentSettlementId).toBe("settlement-901");
+  });
+
+  it("renders only committed reward, XP, activation, and project facts", async () => {
+    vi.stubGlobal("fetch", vi.fn().mockResolvedValueOnce(jsonResponse({ ok: true, data: settlementContext(), error: null, requestId: "req-settlement" })));
+
+    const response = await handleChatTurn({ message: "show settlement settlement-901", history: [], session: {}, auth: cerbanimoAuth(), channel: "sdk" });
+
+    expect(response.message.cards?.[0].kind).toBe("settlement_complete");
+    expect(JSON.stringify(response.message.cards)).toContain("20 XP");
+    expect(JSON.stringify(response.message.cards)).toContain("Deploy pilot");
+    expect(response.message.cards?.[0].body).toContain("1 sealed path has opened");
+    expect(response.message.cards?.[0].body).toContain("ledger records the configured rewards");
+  });
+
+  it("uses direct factual settlement copy for one-turn plain mode", async () => {
+    const fetchMock = vi.fn().mockResolvedValueOnce(jsonResponse({ ok: true, data: settlementContext(), error: null, requestId: "req-settlement" }));
+    vi.stubGlobal("fetch", fetchMock);
+
+    const response = await handleChatTurn({
+      message: "Game Master, show settlement details",
+      history: [],
+      session: { currentSettlementId: "settlement-901", currentSettlementTaskId: 203 },
+      auth: cerbanimoAuth(),
+      channel: "sdk"
+    });
+
+    expect(response.message.content).toMatch(/^Out of character:/);
+    expect(response.message.cards?.[0].body).toMatch(/^Out of character:/);
+    expect(response.session.presentationMode).toBeUndefined();
+    expect(String(fetchMock.mock.calls[0]?.[0])).toContain("/settlements/settlement-901");
+    expect(String(fetchMock.mock.calls[0]?.[0])).not.toContain("/settlements/details");
+  });
+
+  it("shows a retryable failure without victory narration", async () => {
+    process.env.KAMIYA_SETTLEMENT_POLL_MS = "0";
+    vi.stubGlobal("fetch", vi.fn().mockResolvedValueOnce(jsonResponse({
+      ok: true,
+      data: settlementContext({
+        status: "retry_wait",
+        task: { id: 203, name: "Accepted task", status: "submitted", completedAt: null },
+        project: { id: 100, name: "Quest", completed: false, remainingRequiredTasks: 3 },
+        rewards: { contributor: [], peerReviewers: [], pmReviewer: [] },
+        skillChanges: [],
+        activatedTasks: [],
+        storyEvent: { created: false, eventId: null },
+        completionRecord: null,
+        lastError: { code: "SETTLEMENT_QUEUE_FAILED", message: "Queue unavailable.", retryable: true },
+        allowedActions: { view: true, retry: true, cancel: true, reconcile: false }
+      }),
+      error: null,
+      requestId: "req-failure"
+    })));
+
+    const response = await handleChatTurn({ message: "show settlement settlement-901", history: [], session: {}, auth: cerbanimoAuth(), channel: "sdk" });
+
+    expect(response.message.cards?.[0].kind).toBe("settlement_failure");
+    expect(response.message.content).toContain("could not safely apply");
+    expect(JSON.stringify(response.message.cards)).not.toContain("Encounter settled");
   });
 
   it("updates Game Master preferences through slash commands", async () => {
@@ -519,7 +623,7 @@ function mockPreviewFetch() {
     vi.fn().mockResolvedValue({
       ok: true,
       status: 201,
-      headers: new Headers({ "x-request-id": "req-preview" }),
+      headers: contractHeaders("req-preview"),
       json: async () => ({
         ok: true,
         data: actionRow("previewed"),
@@ -778,7 +882,7 @@ function taskEvidenceContext(overrides: Record<string, unknown> = {}) {
   };
 }
 
-function reviewContext(options: { assignmentStatus?: string; allowedActions?: Record<string, boolean>; peerReceived?: number; status?: string; settlement?: string; copy?: string } = {}) {
+function reviewContext(options: { assignmentStatus?: string; allowedActions?: Record<string, boolean>; peerReceived?: number; status?: string; settlement?: string; settlementData?: Record<string, unknown>; copy?: string } = {}) {
   return {
     reviewFeature: { enabled: true, policyVersion: "task-review-v1", manifestVersionRequired: "evidence-manifest-v2" },
     round: {
@@ -809,8 +913,35 @@ function reviewContext(options: { assignmentStatus?: string; allowedActions?: Re
       status: options.assignmentStatus ?? "offered"
     },
     decisions: [],
+    settlement: options.settlementData,
     copy: options.copy,
     allowedActions: options.allowedActions ?? { acceptAssignment: true, recuse: true }
+  };
+}
+
+function settlementContext(overrides: Record<string, unknown> = {}) {
+  return {
+    settlementId: "settlement-901",
+    settlementRecordId: 901,
+    status: "completed",
+    attemptCount: 1,
+    policyVersion: "task-settlement-v1",
+    task: { id: 203, name: "Accepted task", status: "completed", completedAt: "2026-07-12T12:00:00.000Z" },
+    project: { id: 100, name: "Quest", completed: false, remainingRequiredTasks: 2 },
+    rewards: {
+      contributor: [{ amount: 20, tokenType: "project", postedAt: "2026-07-12T12:00:00.000Z" }],
+      peerReviewers: Array.from({ length: 3 }, () => ({ amount: 5, tokenType: "cotoken", postedAt: "2026-07-12T12:00:00.000Z" })),
+      pmReviewer: [{ amount: 6, tokenType: "project_or_community", postedAt: "2026-07-12T12:00:00.000Z" }]
+    },
+    skillChanges: [{ skillId: 5, xpDelta: 20, previousXp: 20, newXp: 40, previousLevel: 1, newLevel: 2, levelChanged: true }],
+    activatedTasks: [{ id: 204, name: "Deploy pilot", status: "active-unassigned" }],
+    storyEvent: { created: true, eventId: "story-1" },
+    completionRecord: { id: 1001, uuid: "completion-1", completedAt: "2026-07-12T12:00:00.000Z" },
+    effectSummary: { applied: 10, skipped: 1 },
+    progress: { status: "completed", stages: [], eventCount: 9 },
+    allowedActions: { view: true, confirm: false, retry: false, cancel: false, reconcile: false },
+    copy: "The accepted task is complete.",
+    ...overrides
   };
 }
 
@@ -853,9 +984,17 @@ function jsonResponse(body: unknown, status = 200) {
     ok: status < 400,
     status,
     statusText: status < 400 ? "OK" : "Bad Request",
-    headers: new Headers({ "x-request-id": (body as { requestId?: string }).requestId ?? "req-test" }),
+    headers: contractHeaders((body as { requestId?: string }).requestId ?? "req-test"),
     json: async () => body
   };
+}
+
+function contractHeaders(requestId: string) {
+  return new Headers({
+    "x-request-id": requestId,
+    "x-cerbanimo-contract-version": CERBANIMO_CONTRACT_VERSION,
+    "x-cerbanimo-contract-digest": CERBANIMO_CONTRACT_DIGEST
+  });
 }
 
 function lastDayOfNextMonth(): string {

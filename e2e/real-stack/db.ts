@@ -106,6 +106,28 @@ export async function expectSuccessfulBootstrap(runId: string): Promise<Database
   return report;
 }
 
+export async function expectPartyQuestBootstrap(runId: string): Promise<{ projectId: number; taskId: number; report: DatabaseReport }> {
+  const report = await databaseReportForRun(runId);
+  expect(report.actionCount, "one persisted party-quest action").toBe(1);
+  expect(report.workflowCount, "one party-quest workflow").toBe(1);
+  expect(report.projectCount, "one party-quest project").toBe(1);
+  expect(report.taskCount, "one completable encounter").toBe(1);
+  expect(report.actionStatus).toBe("executed");
+  expect(report.workflowStatus).toBe("completed");
+  expect(report.projectId).toBeTruthy();
+  const taskId = await withClient(async (client) => {
+    const task = (await client.query(
+      `SELECT id, automation_classification, validation_requirements
+       FROM tasks WHERE project_id = $1 ORDER BY id ASC LIMIT 1`,
+      [report.projectId]
+    )).rows[0];
+    expect(task?.automation_classification).toBe("human_driven");
+    expect(task?.validation_requirements?.[0]?.requirementId).toBe("party-guide-complete");
+    return Number(task.id);
+  });
+  return { projectId: Number(report.projectId), taskId, report };
+}
+
 export async function expectQualityCheckAutomation(projectId?: number): Promise<Record<string, unknown>> {
   expect(projectId).toBeTruthy();
   return withClient(async (client) => {
