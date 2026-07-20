@@ -416,6 +416,23 @@ describe("handleChatTurn", () => {
     expect(JSON.stringify(sealed.message.cards)).toContain("Deploy pilot");
   });
 
+  it("starts co-planning with a focused question instead of naming the request as the project", async () => {
+    const response = await handleChatTurn({
+      message: "Kamiya, can you help me build a plan together?",
+      history: [],
+      session: {},
+      auth: {
+        isLoggedIn: true,
+        displayName: "Glaed",
+        permissions: ["projects:create"]
+      }
+    });
+
+    expect(response.message.content).toContain("What are we hoping to accomplish together?");
+    expect(response.session.planningDraft).toEqual({});
+    expect(response.session.pendingAction).toBeUndefined();
+  });
+
   it("shows pending settlement progress without claiming completion or rewards", async () => {
     process.env.KAMIYA_SETTLEMENT_POLL_MS = "0";
     vi.stubGlobal("fetch", vi.fn().mockResolvedValueOnce(jsonResponse({

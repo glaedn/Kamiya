@@ -192,6 +192,126 @@ export async function seedAcceptedSettlement(options: SettlementSeedOptions = {}
   }
 }
 
+export async function acceptSubmittedPartyQuest(input: {
+  projectId: number;
+  taskId: number;
+  contributorId: number;
+  reviewerId: number;
+}): Promise<SettlementSeed> {
+  const state = readRealStackState();
+  await expect.poll(async () => {
+    const probe = new Client({ connectionString: state.database.url });
+    await probe.connect();
+    try {
+      const row = (await probe.query(
+        `SELECT r.id
+         FROM task_review_rounds r
+         JOIN task_validation_results validation ON validation.id = r.validation_result_id
+         WHERE r.task_id = $1
+           AND validation.overall_verdict = 'passed'
+         ORDER BY r.id DESC
+         LIMIT 1`,
+        [input.taskId]
+      )).rows[0];
+      return Boolean(row);
+    } finally {
+      await probe.end();
+    }
+  }, { timeout: 30_000, intervals: [250, 500, 1000] }).toBe(true);
+
+  const client = new Client({ connectionString: state.database.url });
+  await client.connect();
+  try {
+    await client.query("BEGIN");
+    const round = (await client.query(
+      `SELECT * FROM task_review_rounds WHERE task_id = $1 ORDER BY id DESC LIMIT 1 FOR UPDATE`,
+      [input.taskId]
+    )).rows[0];
+    if (!round) throw new Error(`No review round exists for task ${input.taskId}.`);
+    const policy = {
+      ...(round.policy_snapshot || {}),
+      policyVersion: round.policy_version || "task-review-v1",
+      peerApprovalsRequired: 1,
+      peerReviewerRewardAmount: 10,
+      pmReviewerRewardAmount: 10
+    };
+    await client.query(
+      `UPDATE task_review_rounds
+       SET status = 'accepted_pending_settlement',
+           stage = 'accepted',
+           policy_snapshot = $2::jsonb,
+           peer_approvals_required = 1,
+           peer_approvals_received = 1,
+           peer_gate_satisfied_at = NOW(),
+           peer_gate_method = 'human',
+           pm_gate_satisfied_at = NOW(),
+           pm_gate_method = 'human',
+           accepted_at = NOW(),
+           updated_at = NOW()
+       WHERE id = $1`,
+      [round.id, JSON.stringify(policy)]
+    );
+
+    for (const reviewerRole of ["peer_reviewer", "pm_reviewer"] as const) {
+      let assignment = (await client.query(
+        `SELECT * FROM task_review_assignments
+         WHERE review_round_id = $1 AND reviewer_user_id = $2 AND reviewer_role = $3
+         ORDER BY id DESC LIMIT 1`,
+        [round.id, input.reviewerId, reviewerRole]
+      )).rows[0];
+      if (!assignment) {
+        assignment = (await client.query(
+          `INSERT INTO task_review_assignments (
+             review_round_id, reviewer_user_id, reviewer_role, status,
+             accepted_at, conflict_snapshot, eligibility_snapshot
+           ) VALUES ($1, $2, $3, 'completed', NOW(), '{}'::jsonb, $4::jsonb)
+           RETURNING *`,
+          [round.id, input.reviewerId, reviewerRole, JSON.stringify({ basis: ["party_completion_fixture"] })]
+        )).rows[0];
+      } else {
+        assignment = (await client.query(
+          `UPDATE task_review_assignments SET status = 'completed', accepted_at = COALESCE(accepted_at, NOW()), updated_at = NOW()
+           WHERE id = $1 RETURNING *`,
+          [assignment.id]
+        )).rows[0];
+      }
+      await client.query(
+        `INSERT INTO task_review_decisions (
+           review_round_id, assignment_id, reviewer_user_id, decision, reason,
+           requirement_findings, evidence_manifest_sha256, policy_version, decision_source
+         ) VALUES ($1, $2, $3, 'approve', $4, '[]'::jsonb, $5, $6, 'human')
+         ON CONFLICT DO NOTHING`,
+        [round.id, assignment.id, input.reviewerId, `Party quest ${reviewerRole} approval.`, round.evidence_manifest_sha256, round.policy_version]
+      );
+    }
+
+    await client.query(
+      `INSERT INTO task_acceptance_records (
+         task_id, bundle_id, validation_result_id, review_round_id,
+         evidence_manifest_sha256, peer_gate_method, pm_gate_method,
+         policy_version, settlement_status
+       ) VALUES ($1, $2, $3, $4, $5, 'human', 'human', $6, 'pending')
+       ON CONFLICT (review_round_id) DO NOTHING`,
+      [input.taskId, round.bundle_id, round.validation_result_id, round.id, round.evidence_manifest_sha256, round.policy_version]
+    );
+    await client.query("COMMIT");
+    return {
+      key: `party_quest_${input.projectId}`,
+      projectId: input.projectId,
+      taskId: input.taskId,
+      dependentTaskIds: [],
+      contributorId: input.contributorId,
+      peerIds: [input.reviewerId],
+      pmId: input.reviewerId
+    };
+  } catch (error) {
+    await client.query("ROLLBACK");
+    throw error;
+  } finally {
+    await client.end();
+  }
+}
+
 export async function settlementReport(seed: SettlementSeed) {
   const state = readRealStackState();
   const client = new Client({ connectionString: state.database.url });

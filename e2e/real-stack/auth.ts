@@ -56,6 +56,21 @@ export function bearerHeaders(actor: RealStackActor): Record<string, string> {
   };
 }
 
+export async function seedResoneraAuth(page: Page, actor: RealStackActor): Promise<void> {
+  await page.addInitScript(({ actor }) => {
+    sessionStorage.setItem("resonera_cerbanimo_session", JSON.stringify({
+      tokenType: "Bearer",
+      accessToken: actor.token,
+      expiresAt: Date.now() + 60 * 60 * 1000,
+      user: {
+        sub: actor.auth0Id,
+        name: actor.displayName,
+        email: actor.email
+      }
+    }));
+  }, { actor });
+}
+
 function publicStateForBrowser(state: ReturnType<typeof readRealStackState>) {
   return {
     cerbanimoApiBase: state.cerbanimoApiBase

@@ -26,6 +26,7 @@
     "test:e2e:settlement:mobile": "playwright test e2e/settlement.contract.spec.ts --project=mobile-chromium",
     "test:e2e:settlement:real": "playwright test -c playwright.real-stack.config.ts e2e/settlement.integration.spec.ts",
     "test:e2e:core-world": "playwright test -c playwright.real-stack.config.ts e2e/core-world.integration.spec.ts --project=chromium",
+    "test:e2e:party-quest": "playwright test -c playwright.real-stack.config.ts e2e/party-quest.integration.spec.ts --project=chromium",
     "test:e2e:debug": "playwright test --debug",
     "test:e2e:report": "playwright show-report",
     "contract:verify": "node scripts/verify-cerbanimo-contract.mjs",

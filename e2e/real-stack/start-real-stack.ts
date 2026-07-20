@@ -281,7 +281,8 @@ function startProcesses(): void {
       PORT: String(ports.cerbanimoPort),
       BACKEND_URL: `http://127.0.0.1:${ports.cerbanimoPort}`,
       FRONTEND_URL: `http://127.0.0.1:${ports.webPort}`,
-      KAMIYA_ALLOWED_ORIGINS: `http://127.0.0.1:${ports.webPort}`,
+      RESONERA_PUBLIC_ORIGIN: `http://127.0.0.1:${ports.resoneraPort}`,
+      KAMIYA_ALLOWED_ORIGINS: `http://127.0.0.1:${ports.webPort},http://127.0.0.1:${ports.resoneraPort}`,
       GEMINI_API_KEY: "disabled-for-e2e",
       CERBANIMO_E2E_MODE: "true",
       CERBANIMO_PROJECT_BOOTSTRAP_PROVIDER: "deterministic",
@@ -311,7 +312,7 @@ function startProcesses(): void {
     }
   });
 
-  spawnManaged("vite", process.execPath, [path.join(rootDir, "node_modules/vite/bin/vite.js"), "--host", "127.0.0.1", "--port", String(ports.webPort)], {
+  spawnManaged("vite", process.execPath, [path.join(rootDir, "node_modules/vite/bin/vite.js"), "--host", "127.0.0.1", "--port", String(ports.webPort), "--strictPort"], {
     cwd: rootDir,
     env: {
       ...process.env,
